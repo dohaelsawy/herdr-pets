@@ -39,7 +39,7 @@ export default class Pets extends View {
     cx.timer.every(CHECK_MS, (cx) => this.check(cx));
     // keys.json can bind "pets.spawn", "pets.remove-all", "pets.size-<name>" and
     // "pets.theme-<name>".
-    cx.spawn(async () => {
+    cx.spawn(async (cx) => {
       for (;;) {
         const c = await nextCommand();
         try {
@@ -49,6 +49,9 @@ export default class Pets extends View {
         } catch (e) {
           console.log(`pets: command ${c} failed: ${e?.message ?? e}`); // and keep listening
         }
+        // Using cx here is what ends this loop when the mod is reloaded: without it
+        // the old build's loop lives on and takes every other command.
+        cx.notify();
       }
     });
   }
