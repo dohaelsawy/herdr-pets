@@ -1,0 +1,59 @@
+herdr-pets is a port of VS Code Pets (https://github.com/tonybaloney/vscode-pets)
+to the Herdr app.
+
+Code
+----
+mods/pets/pets.js (each pet's behaviour table, colours and names) is generated
+from the VS Code Pets source, and mods/pets/engine.js follows its state machine.
+VS Code Pets is distributed under the MIT License:
+
+    MIT License
+
+    Copyright (c) 2022 Anthony Shaw
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+Art
+---
+This repository contains no art. When it runs, the mod reads the sprites from
+the VS Code Pets extension installed on the user's machine, or downloads them
+from the VS Code Pets repository. Mirrored copies are made on the user's machine
+and are not redistributed. The artists, as credited by VS Code Pets:
+
+- Cat and frog animations: seethingswarm (https://seethingswarm.itch.io)
+- Dog media assets: NVPH Studio (https://nvph-studio.itch.io/dog-animation-4-different-dogs),
+  licensed CC BY-ND 4.0
+- Akita inu: Kevin Huang (https://github.com/kevin2huang)
+- Clippy, Rocky, Zappy, rubber duck, snake, cockatiel, Ferris the crab and Mod
+  the dotnet bot: Marc Duiker (https://twitter.com/marcduiker)
+- Original concept of Ferris the crab: Karen Rustad Tölva (https://www.aldeka.net)
+- Fox: Elthen (https://twitter.com/pixelthen)
+- Turtle: enkeefe
+- Horse: adapted by Chris Kent (https://github.com/thechriskent) from assets by
+  Onfe (https://onfe.itch.io/horse-sprite-with-rider-asset-pack)
+- Squirrel: adapted by Chris Kent from assets by Azdner (https://azdner.itch.io/)
+- Skeleton: adapted by Chris Kent from assets by MonoPixelArt (https://monopixelart.itch.io/)
+- Snail: Kennet Shin (https://github.com/WoofWoof0)
+- Panda: Jessie Ferris (https://github.com/jeferris)
+- Finley: Microsoft Corporation, MIT License
+- Winter theme: Kiana Mosser (https://www.instagram.com/kianamosser/)
+- Forest theme: edermunizz (https://edermunizz.itch.io/free-pixel-art-forest)
+- Castle theme: made with artwork by GuttyKreum (https://guttykreum.itch.io/gothic-castle-game-assets)
+
+See the VS Code Pets README for the full and current credits.
