@@ -14,8 +14,9 @@ export const MOD = "pets";
 
 export const openPicker = () => openOverlay({ mod: MOD, kind: "dialog", width: 420, height: 540, props: { role: "picker" } });
 export const openRename = (pet) => openOverlay({ mod: MOD, kind: "dialog", width: 340, height: 170, props: { role: "rename", pet } });
-// what: { menu: "ground" } or { menu: "pet", pet: <id> }
-export const openMenu = (what) => openOverlay({ mod: MOD, kind: "popup", at: "pointer", width: 200, height: 440, props: { role: "menu", ...what } });
+// what: { menu: "ground" } or { menu: "pet", pet: <id> }. The heights fit each menu's rows.
+export const openMenu = (what) =>
+  openOverlay({ mod: MOD, kind: "popup", at: "pointer", width: 200, height: what.menu === "pet" ? 90 : 400, props: { role: "menu", ...what } });
 
 const close = () => closeOverlay(props().overlay);
 const save = (change) => setShared(KEY, change(load(shared(KEY))));
@@ -71,9 +72,11 @@ const picker = {
     cx.spawn(async (cx) => {
       try {
         await loadPet(pet.type, pet.color); // no sprites, no pet
+        if (v.closed) return; // closed while it fetched: the person changed their mind
         save((s) => addPet(s, pet));
         close();
       } catch (e) {
+        if (v.closed) return;
         v.busy = false;
         v.error = String(e?.message ?? e);
         notify({ title: `Couldn't add the ${pretty(pet.type).toLowerCase()}`, body: v.error, level: "error" });
@@ -86,7 +89,7 @@ const picker = {
     const t = theme();
     const full = load(shared(KEY)).pets.length >= MAX_PETS;
     const f = v.filter.trim().toLowerCase();
-    const shown = TYPES.filter((type) => !f || type.includes(f));
+    const shown = TYPES.filter((type) => !f || type.includes(f) || pretty(type).toLowerCase().includes(f)); // "rubber duck" too
     const locked = (type) => v.extension === false && EXTENSION_ONLY.includes(type);
     const def = v.type ? PETS[v.type] : null;
     return v_flex().id("pets-picker").size_full().min_h(0).p(18).gap(10).bg(t.popover).text_color(t.foreground)
