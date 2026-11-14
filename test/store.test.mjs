@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MAX_PETS, load, addPet, removePet, renamePet, removeAll, withSize, withTheme, floorFor, randomName, newId } from "../mods/pets/store.js";
+import { MAX_PETS, load, addPet, removePet, renamePet, removeAll, withSize, withTheme, floorFor, randomName, newId, applyCommand } from "../mods/pets/store.js";
 import { PETS } from "../mods/pets/pets.js";
 
 const rex = { id: "a", type: "dog", color: "brown", name: "Rex" };
@@ -87,5 +87,20 @@ test("addPet ignores a pet whose id is already there", () => {
 test("load drops a pet whose type is not a string", () => {
   for (const type of [{ toString: 1 }, ["dog"], 7, null, undefined]) {
     assert.deepEqual(load({ pets: [{ id: "x", type, color: "brown", name: "X" }, rex] }).pets, [rex], JSON.stringify(type));
+  }
+});
+
+test("applyCommand changes size, theme and the list from a command's name", () => {
+  const state = load({ pets: [rex], size: "nano", theme: "none" });
+  assert.equal(applyCommand(state, "size-large").size, "large");
+  assert.equal(applyCommand(state, "theme-forest").theme, "forest");
+  assert.deepEqual(applyCommand(state, "remove-all").pets, []);
+  assert.deepEqual(applyCommand(state, "size-large").pets, [rex]); // the rest is kept
+});
+
+test("applyCommand gives null for a command that does not change the saved state", () => {
+  const state = load(undefined);
+  for (const command of ["spawn", "size-huge", "theme-space", "size-", "nonsense", "", undefined]) {
+    assert.equal(applyCommand(state, command), null, String(command));
   }
 });

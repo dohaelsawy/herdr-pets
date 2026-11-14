@@ -70,3 +70,16 @@ export function renamePet(state, id, name) {
 export const removeAll = (state) => ({ ...state, pets: [] });
 export const withSize = (state, size) => (SIZE_NAMES.includes(size) ? { ...state, size } : state);
 export const withTheme = (state, theme) => (THEMES.includes(theme) ? { ...state, theme } : state);
+
+// What a key command does to the saved value: "size-<name>", "theme-<name>" or
+// "remove-all" ("pets.size-large" in keys.json). Null for any other command.
+export function applyCommand(state, command) {
+  const c = String(command ?? "");
+  if (c === "remove-all") return removeAll(state);
+  for (const [prefix, change] of [["size-", withSize], ["theme-", withTheme]]) {
+    if (!c.startsWith(prefix)) continue;
+    const next = change(state, c.slice(prefix.length));
+    return next === state ? null : next;
+  }
+  return null;
+}

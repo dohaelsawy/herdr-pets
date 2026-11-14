@@ -6,7 +6,7 @@ import { shared, setShared, theme, settings, props, notify, nextCommand } from "
 import { PETS } from "./pets.js";
 import { SIZES } from "./engine.js";
 import { reconcile, hover, drawing } from "./roster.js";
-import { KEY, load, floorFor, removeAll } from "./store.js";
+import { KEY, load, floorFor, applyCommand } from "./store.js";
 import { loadPet, loadTheme } from "./art.js";
 import { DIALOGS, openPicker, openMenu } from "./dialogs.js";
 
@@ -37,13 +37,15 @@ export default class Pets extends View {
     this.art = {}; // "type/colour" -> sprites | { pending: <since> } | { error, at }
     this.scenes = {}; // "theme/kind/size" -> pictures | { pending } | { error, at }
     cx.timer.every(CHECK_MS, (cx) => this.check(cx));
-    // keys.json can bind "pets.spawn" and "pets.remove-all".
+    // keys.json can bind "pets.spawn", "pets.remove-all", "pets.size-<name>" and
+    // "pets.theme-<name>".
     cx.spawn(async () => {
       for (;;) {
         const c = await nextCommand();
         try {
-          if (c === "spawn") openPicker();
-          else if (c === "remove-all") setShared(KEY, removeAll(load(shared(KEY))));
+          const next = applyCommand(load(shared(KEY)), c);
+          if (next) setShared(KEY, next);
+          else if (c === "spawn") openPicker();
         } catch (e) {
           console.log(`pets: command ${c} failed: ${e?.message ?? e}`); // and keep listening
         }
