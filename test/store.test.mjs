@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MAX_PETS, load, addPet, removePet, renamePet, removeAll, withSize, withTheme, floorFor, randomName, newId, applyCommand } from "../mods/pets/store.js";
+import { MAX_PETS, load, addPet, removePet, renamePet, removeAll, withSize, withTheme, floorFor, randomName, newId, applyCommand, boxOf, namedSize } from "../mods/pets/store.js";
 import { PETS } from "../mods/pets/pets.js";
 
 const rex = { id: "a", type: "dog", color: "brown", name: "Rex" };
@@ -103,4 +103,31 @@ test("applyCommand gives null for a command that does not change the saved state
   for (const command of ["spawn", "size-huge", "theme-space", "size-", "nonsense", "", undefined]) {
     assert.equal(applyCommand(state, command), null, String(command));
   }
+});
+
+test("a size can be a number of pixels as well as one of the four names", () => {
+  const state = load(undefined);
+  assert.equal(withSize(state, 45).size, 45);
+  assert.equal(withSize(state, "45").size, 45); // as a command spells it
+  assert.equal(load({ size: 45 }).size, 45);
+  assert.equal(applyCommand(state, "size-45").size, 45);
+  assert.equal(applyCommand(state, "size-small").size, "small");
+});
+
+test("a pixel size outside 20 to 160, or not a whole number, is refused", () => {
+  const state = load(undefined);
+  for (const bad of [19, 161, 0, -45, 45.5, "45px", "", NaN, null]) assert.equal(withSize(state, bad), state, String(bad));
+  assert.equal(load({ size: 500 }).size, "medium");
+  assert.equal(applyCommand(state, "size-500"), null);
+});
+
+test("boxOf gives the pixel box for a name or a number", () => {
+  assert.deepEqual(["nano", "small", "medium", "large", 45].map(boxOf), [30, 40, 55, 110, 45]);
+});
+
+test("namedSize picks the nearest of the four sizes, for a theme's pictures and floor", () => {
+  assert.equal(namedSize("large"), "large");
+  assert.deepEqual([20, 34, 36, 45, 48, 80, 83, 160].map(namedSize), ["nano", "nano", "small", "small", "medium", "medium", "large", "large"]);
+  assert.equal(floorFor("forest", 45), 30); // the small picture's ground
+  assert.equal(floorFor("none", 45), 0);
 });

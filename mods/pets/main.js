@@ -4,9 +4,8 @@
 import { View, div, image } from "gpui-kit";
 import { shared, setShared, theme, settings, props, notify, nextCommand } from "herdr";
 import { PETS } from "./pets.js";
-import { SIZES } from "./engine.js";
 import { reconcile, hover, drawing } from "./roster.js";
-import { KEY, load, floorFor, applyCommand } from "./store.js";
+import { KEY, load, floorFor, applyCommand, boxOf, namedSize } from "./store.js";
 import { loadPet, loadTheme } from "./art.js";
 import { DIALOGS, openPicker, openMenu } from "./dialogs.js";
 
@@ -83,7 +82,7 @@ export default class Pets extends View {
   }
 
   sceneKey(state) {
-    return `${state.theme}/${settings()?.dark === false ? "light" : "dark"}/${state.size}`;
+    return `${state.theme}/${settings()?.dark === false ? "light" : "dark"}/${namedSize(state.size)}`;
   }
 
   // A saved pet's loaded sprites, or null while there are none.
@@ -97,7 +96,7 @@ export default class Pets extends View {
     if (state.theme !== "none") {
       const dark = settings()?.dark !== false;
       const key = this.sceneKey(state);
-      this.want(this.scenes, key, () => loadTheme(state.theme, dark, state.size), `Couldn't load the ${state.theme} theme`, cx);
+      this.want(this.scenes, key, () => loadTheme(state.theme, dark, namedSize(state.size)), `Couldn't load the ${state.theme} theme`, cx);
       scene = loaded(this.scenes[key]);
     }
     for (const p of state.pets) {
@@ -105,7 +104,7 @@ export default class Pets extends View {
     }
     // Pets stand on a theme's ground only once its picture is there to stand on.
     this.env = { width: this.width, height: this.height, floor: scene ? floorFor(state.theme, state.size) : 0 };
-    if (reconcile(this.live, state.pets, (p) => this.sprites(p), SIZES[state.size], this.env, Date.now(), Math.random)) cx.notify();
+    if (reconcile(this.live, state.pets, (p) => this.sprites(p), boxOf(state.size), this.env, Date.now(), Math.random)) cx.notify();
   }
 
   render(cx) {
@@ -113,7 +112,7 @@ export default class Pets extends View {
     const t = theme();
     const now = Date.now();
     const state = load(shared(KEY));
-    const box = SIZES[state.size];
+    const box = boxOf(state.size);
     const scene = state.theme === "none" ? null : loaded(this.scenes[this.sceneKey(state)]);
 
     const root = div()

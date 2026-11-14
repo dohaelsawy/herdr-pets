@@ -46,6 +46,9 @@ runs no other program. Sprites are cached in `~/.config/herdr-app/data/pets/`.
   and `pets.theme-<none|forest|castle|beach|winter|autumn|library>` in
   `~/.config/herdr-app/keys.json`. The same commands work from a shell:
   `herdr-app do pets.size-small`.
+- If none of the four sizes suits your panel, give one in pixels, from 20 to 160:
+  `herdr-app do pets.size-45`. A theme then uses the pictures of the nearest of the
+  four sizes.
 
 Up to 20 pets. Your pets, the size and the theme are remembered. Pets start at
 medium (55 px).

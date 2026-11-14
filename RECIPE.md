@@ -45,7 +45,9 @@ Code Pets. They are decoration and know nothing about agents.
 - Right-click the ground: popup with Add pet…, Theme (7, the current one ticked), Size
   (4, ticked), Remove all.
 - Commands `pets.spawn` (opens the dialog), `pets.remove-all`, `pets.size-<name>` and
-  `pets.theme-<name>`. No keys are shipped.
+  `pets.theme-<name>`. No keys are shipped. `pets.size-<n>` with a whole number from 20
+  to 160 sets the box in pixels; the Size menu then shows a ticked "<n> px" row, and a
+  theme uses the pictures and ground of the nearest named size.
 - Pets, size and theme are saved; positions are not. After a restart pets start at a
   random spot.
 

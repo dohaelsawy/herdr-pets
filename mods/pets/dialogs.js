@@ -16,7 +16,7 @@ export const openPicker = () => openOverlay({ mod: MOD, kind: "dialog", width: 4
 export const openRename = (pet) => openOverlay({ mod: MOD, kind: "dialog", width: 340, height: 170, props: { role: "rename", pet } });
 // what: { menu: "ground" } or { menu: "pet", pet: <id> }. The heights fit each menu's rows.
 export const openMenu = (what) =>
-  openOverlay({ mod: MOD, kind: "popup", at: "pointer", width: 200, height: what.menu === "pet" ? 90 : 400, props: { role: "menu", ...what } });
+  openOverlay({ mod: MOD, kind: "popup", at: "pointer", width: 200, height: what.menu === "pet" ? 90 : 430, props: { role: "menu", ...what } });
 
 const close = () => closeOverlay(props().overlay);
 const save = (change) => setShared(KEY, change(load(shared(KEY))));
@@ -177,6 +177,8 @@ function menuRows(p, state) {
     ...THEMES.map((name) => ({ text: cap(name), on: state.theme === name, run: () => save((s) => withTheme(s, name)) })),
     { label: "Size" },
     ...SIZE_NAMES.map((name) => ({ text: cap(name), on: state.size === name, run: () => save((s) => withSize(s, name)) })),
+    // A size set in pixels by command ("pets.size-45") shows as its own ticked row.
+    ...(typeof state.size === "number" ? [{ text: `${state.size} px`, on: true, run: () => {} }] : []),
     { label: "" },
     { text: "Remove all", run: () => save(removeAll) },
   ];

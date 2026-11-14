@@ -1,6 +1,7 @@
 // What is saved: the pets, the size and the theme. Pure helpers over that one value;
 // main.js reads it with shared(KEY) and writes it with setShared(KEY, value).
 import { PETS } from "./pets.js";
+import { SIZES } from "./engine.js";
 
 export const KEY = "pets";
 export const MAX_PETS = 20;
@@ -9,6 +10,21 @@ export const THEMES = ["none", "forest", "castle", "beach", "winter", "autumn", 
 // Upstream starts at nano (30 px), sized for a wide editor panel. In a Herdr sidebar
 // that is too small to see, so this starts one step below upstream's largest.
 export const DEFAULT_SIZE = "medium";
+
+// A size is one of upstream's four names, or a whole number of pixels for the pet's
+// box, for when none of the four suits a panel ("pets.size-45").
+export const MIN_BOX = 20;
+export const MAX_BOX = 160;
+const validSize = (size) => SIZE_NAMES.includes(size) || (Number.isInteger(size) && size >= MIN_BOX && size <= MAX_BOX);
+
+// The pet's box in pixels.
+export const boxOf = (size) => (typeof size === "number" ? size : SIZES[size]);
+
+// The nearest of the four names: a theme's pictures and ground exist only for those.
+export function namedSize(size) {
+  if (typeof size !== "number") return size;
+  return SIZE_NAMES.reduce((best, name) => (Math.abs(SIZES[name] - size) < Math.abs(SIZES[best] - size) ? name : best));
+}
 
 // Where the ground is in each theme's picture, px above the bottom (upstream themes.ts).
 const FLOORS = {
@@ -21,7 +37,7 @@ const FLOORS = {
   library: { nano: 16, small: 22, medium: 32, large: 44 },
 };
 
-export const floorFor = (theme, size) => FLOORS[theme]?.[size] ?? 0;
+export const floorFor = (theme, size) => FLOORS[theme]?.[namedSize(size)] ?? 0;
 
 const pick = (list, rng) => list[Math.min(list.length - 1, Math.floor(rng() * list.length))];
 
@@ -51,7 +67,7 @@ export function load(raw) {
   }
   return {
     pets,
-    size: SIZE_NAMES.includes(saved.size) ? saved.size : DEFAULT_SIZE,
+    size: validSize(saved.size) ? saved.size : DEFAULT_SIZE,
     theme: THEMES.includes(saved.theme) ? saved.theme : "none",
   };
 }
@@ -71,7 +87,11 @@ export function renamePet(state, id, name) {
 }
 
 export const removeAll = (state) => ({ ...state, pets: [] });
-export const withSize = (state, size) => (SIZE_NAMES.includes(size) ? { ...state, size } : state);
+export function withSize(state, size) {
+  // A command spells a pixel size as text: "45".
+  const value = typeof size === "string" && /^\d+$/.test(size) ? Number(size) : size;
+  return validSize(value) ? { ...state, size: value } : state;
+}
 export const withTheme = (state, theme) => (THEMES.includes(theme) ? { ...state, theme } : state);
 
 // What a key command does to the saved value: "size-<name>", "theme-<name>" or
