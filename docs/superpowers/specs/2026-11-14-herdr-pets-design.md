@@ -314,3 +314,22 @@ Made on 2026-11-14 after the per-task and whole-branch reviews:
 - A saved pet whose type is not one of the tables' own string keys is dropped.
 - Tests need Node 22 or newer (the test script uses a glob).
 
+Made on 2026-11-14 during the owner's trial in the running app:
+
+- **Placement.** `"place": "left"` made Herdr dock a full-height column at the far
+  left, which the owner rejected. A mod cannot ask to be placed inside the sidebar,
+  so `mod.json` is now `{ "place": "none", "title": "Pets" }` and the recipe tells
+  the installer to add a 110 px block in the sidebar column above its footer.
+- **Default size is medium** (55 px), not upstream's nano: nano is too small to see
+  in a sidebar.
+- **Herdr stops a script after about half a second without a break**, and the stop
+  cannot be caught (measured: 400 ms passes, 800 ms is stopped). Totoro's sprites
+  took longer than that to mirror, so its load died silently. `gif.js` now works in
+  steps of 16384 pixels (about 5 ms each in Herdr's engine) and the loader awaits a
+  real host call between them at least every 25 ms. A load silent for two minutes is
+  started again.
+- **Commands** `pets.size-<name>` and `pets.theme-<name>` were added beside
+  `pets.spawn` and `pets.remove-all`.
+- **Herdr does not hot-reload a symlinked mod folder.** Development copies the mod
+  in with `scripts/sync-to-herdr.sh`.
+

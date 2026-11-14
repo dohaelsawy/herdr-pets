@@ -20,7 +20,8 @@
 - Upstream is pinned to tag `1.37.0` of `tonybaloney/vscode-pets`.
 - Herdr rules for mod code: no DOM, no `setTimeout`/`setInterval` (use `cx.timer`), no top-level `await`, never keep a `cx` for later, animate with `.transition`/`.loop`, not a timer.
 - A mod is not done until `herdr-app check mods/pets` prints `check passed`.
-- Limits and defaults, verbatim from the spec: 20 pets; sizes nano 30, small 40, medium 55, large 110 px; default size nano; default theme none; panel `{ "place": "left", "size": 220 }`.
+- Limits and defaults: 20 pets; sizes nano 30, small 40, medium 55, large 110 px; default size medium; default theme none; `mod.json` is `{ "place": "none", "title": "Pets" }` (the mod does not dock itself; the recipe puts a 110 px block in the sidebar above the footer).
+- Herdr stops a script that runs about half a second without a break, uncatchably. No synchronous work may be long: `gif.js` works in steps of `SLICE` pixels and the loader pauses for the app between them.
 - Commit after every task. End each commit message with:
   `Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>`
 - Nothing is pushed to GitHub until the owner says so (Task 9).
@@ -423,7 +424,8 @@ Herdr's UI kit cannot flip an image, so a left-facing copy of every sprite has t
 - Consumes: nothing.
 - Produces, from `mods/pets/gif.js`:
   - `readSize(bytes: Uint8Array): { width: number, height: number }` — throws `Error("not a GIF")`.
-  - `flop(bytes: Uint8Array): Uint8Array` — the same animation mirrored left to right. Throws on a malformed file; it never loops on bad data (it runs on Herdr's own thread, on downloaded bytes).
+  - `flop(bytes: Uint8Array): Uint8Array` — the same animation mirrored left to right, straight through (tests, small files). Throws on a malformed file; it never loops on bad data.
+  - `flopSteps(bytes)`: the same work as a generator that yields after every `SLICE` (16384) pixels; `flopAsync(bytes, breathe): Promise<Uint8Array>` awaits `breathe()` between steps. Herdr stops a script after about half a second without a break, so inside Herdr only `flopAsync` may be used.
   - `decode(bytes: Uint8Array): { width, height, frames: { left, top, width, height, pixels: Uint8Array }[] }` — palette indexes; for tests.
   - `lzwEncode(minCode: number, pixels: Uint8Array): Uint8Array`, `lzwDecode(minCode: number, data: Uint8Array, count: number): Uint8Array`.
 - Produces, from `test/helpers.mjs`:
@@ -522,7 +524,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { readSize, decode, flop, lzwEncode, lzwDecode } from "../mods/pets/gif.js";
+import { readSize, decode, flop, flopAsync, flopSteps, SLICE, lzwEncode, lzwDecode } from "../mods/pets/gif.js";
 import { makeGif, controlBlocks, gifWithImageData } from "./helpers.mjs";
 
 const PALETTE = [[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]];
@@ -642,6 +644,35 @@ test("a file cut inside an image header says so", () => {
   assert.throws(() => flop(gif.subarray(0, at + 4)), /GIF ended inside an image header/);
 });
 
+// One frame bigger than several slices, with a pattern that mirrors to something else.
+const bigGif = () => {
+  const [w, h] = [300, 200];
+  const pixels = Array.from({ length: w * h }, (_, i) => ((i % w) * 7 + Math.floor(i / w)) % 4);
+  return makeGif({ width: w, height: h, palette: PALETTE, frames: [{ pixels }, { pixels: pixels.map((p) => (p + 1) % 4), delay: 20 }] });
+};
+
+test("the mirror works in slices: it stops for breath many times in a big frame", () => {
+  const gif = bigGif();
+  let breaths = 0;
+  for (const _ of flopSteps(gif)) breaths++;
+  // 2 frames of 60,000 pixels, each read once and written once, a breath every SLICE.
+  assert.ok(breaths >= Math.floor((2 * 2 * 60000) / SLICE), `${breaths} breaths`);
+  assert.ok(SLICE <= 20000, "a slice must stay small: Herdr stops a script after about half a second");
+});
+
+test("flopAsync gives the same bytes as flop and waits between slices", async () => {
+  const gif = bigGif();
+  let waits = 0;
+  const out = await flopAsync(gif, async () => { waits++; });
+  assert.deepEqual(out, flop(gif));
+  assert.ok(waits >= 10, `${waits} waits`);
+});
+
+test("flopAsync rejects malformed data the same way", async () => {
+  const gif = makeGif({ width: 2, height: 1, palette: PALETTE, frames: [{ pixels: [1, 2] }] });
+  await assert.rejects(flopAsync(gif.subarray(0, gif.length - 3), async () => {}));
+});
+
 // Runs only on a machine with vscode-pets installed; the art is read, never copied here.
 async function installedMedia() {
   for (const dir of [".vscode", ".vscode-insiders", ".cursor", ".vscode-oss"]) {
@@ -681,16 +712,32 @@ Expected: FAIL with `Cannot find module` … `mods/pets/gif.js`.
 ```js
 // Reads a GIF's size and writes a mirrored copy. Pure: bytes in, bytes out.
 // Herdr's UI kit cannot flip an image, so left-facing sprites have to exist as files.
+//
+// Herdr stops a script that runs for about half a second without a break, and the
+// stop cannot be caught. A big sprite (totoro's is 27 frames of 600 x 396) takes
+// longer than that to mirror. So the work is written as steps: every function with a
+// * yields after each SLICE pixels, flop() runs the steps straight through, and
+// flopAsync() takes a breath between them.
 
 const u16 = (b, p) => b[p] | (b[p + 1] << 8);
-// Far beyond any sprite (the largest upstream one is 696 x 460). A frame claiming
-// more is not decoded: this code runs on Herdr's own thread.
-const MAX_PIXELS = 4_000_000;
 const tableLength = (packed) => (packed & 0x80 ? 3 * (1 << ((packed & 7) + 1)) : 0);
+// Far beyond any sprite (the largest upstream one is 696 x 460). A frame claiming
+// more is not decoded.
+const MAX_PIXELS = 4_000_000;
+// Pixels of work between two breaths: a few milliseconds in Herdr's script engine.
+export const SLICE = 16384;
 
 export function readSize(bytes) {
   if (bytes.length < 13 || bytes[0] !== 0x47 || bytes[1] !== 0x49 || bytes[2] !== 0x46) throw new Error("not a GIF");
   return { width: u16(bytes, 6), height: u16(bytes, 8) };
+}
+
+// Runs a stepped function to its end without a break.
+function finish(steps) {
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
 }
 
 // GIF data is cut into sub-blocks: a length byte, that many bytes, ... and a 0 to end.
@@ -709,16 +756,20 @@ function readSubBlocks(b, p) {
   return { data, end: p + 1 };
 }
 
-function writeSubBlocks(out, data) {
+function subBlocks(data) {
+  const out = new Uint8Array(data.length + Math.ceil(data.length / 255) + 1);
+  let o = 0;
   for (let i = 0; i < data.length; i += 255) {
     const n = Math.min(255, data.length - i);
-    out.push(n);
-    for (let j = 0; j < n; j++) out.push(data[i + j]);
+    out[o++] = n;
+    out.set(data.subarray(i, i + n), o);
+    o += n;
   }
-  out.push(0);
+  out[o++] = 0;
+  return out.subarray(0, o);
 }
 
-export function lzwDecode(minCode, data, count) {
+function* lzwDecodeSteps(minCode, data, count) {
   const clear = 1 << minCode;
   const eoi = clear + 1;
   const prefix = new Uint16Array(4096);
@@ -734,6 +785,7 @@ export function lzwDecode(minCode, data, count) {
   let datum = 0;
   let bits = 0;
   let op = 0;
+  let breath = SLICE;
   for (let p = 0; p < data.length; p++) {
     datum |= data[p] << bits;
     bits += 8;
@@ -785,25 +837,35 @@ export function lzwDecode(minCode, data, count) {
       old = incoming;
       while (sp > 0 && op < count) out[op++] = stack[--sp];
     }
+    if (op >= breath) {
+      breath = op + SLICE;
+      yield;
+    }
   }
   if (op < count) throw new Error("GIF image data ends early");
   return out;
 }
 
-export function lzwEncode(minCode, pixels) {
+// The writer's table of (code so far, next pixel) -> code, as two flat arrays:
+// much quicker in Herdr's script engine than a Map.
+const SLOTS = 8192; // a power of two, twice the 4096 codes there can be
+function* lzwEncodeSteps(minCode, pixels) {
   const clear = 1 << minCode;
   const eoi = clear + 1;
-  const out = [];
+  // A code is at most 12 bits and there is at most one per pixel, plus the two ends.
+  const out = new Uint8Array(pixels.length * 2 + 16);
+  const keys = new Int32Array(SLOTS).fill(-1);
+  const codes = new Uint16Array(SLOTS);
+  let o = 0;
   let size = minCode + 1;
   let next = eoi + 1;
   let datum = 0;
   let bits = 0;
-  let table = new Map();
   const emit = (code) => {
     datum |= code << bits;
     bits += size;
     while (bits >= 8) {
-      out.push(datum & 255);
+      out[o++] = datum & 255;
       datum >>>= 8;
       bits -= 8;
     }
@@ -814,30 +876,36 @@ export function lzwEncode(minCode, pixels) {
     for (let i = 1; i < pixels.length; i++) {
       const px = pixels[i];
       const key = (cur << 8) | px;
-      const hit = table.get(key);
-      if (hit !== undefined) {
-        cur = hit;
-        continue;
-      }
-      emit(cur);
-      if (next < 4096) {
-        table.set(key, next++);
-        // The reader grows its code size one code later than the writer adds an entry.
-        if (next > 1 << size && size < 12) size++;
+      let slot = (Math.imul(key, 0x9e3779b1) >>> 19) & (SLOTS - 1);
+      while (keys[slot] !== -1 && keys[slot] !== key) slot = (slot + 1) & (SLOTS - 1);
+      if (keys[slot] === key) {
+        cur = codes[slot];
       } else {
-        emit(clear);
-        table = new Map();
-        size = minCode + 1;
-        next = eoi + 1;
+        emit(cur);
+        if (next < 4096) {
+          keys[slot] = key;
+          codes[slot] = next++;
+          // The reader grows its code size one code later than the writer adds an entry.
+          if (next > 1 << size && size < 12) size++;
+        } else {
+          emit(clear);
+          keys.fill(-1);
+          size = minCode + 1;
+          next = eoi + 1;
+        }
+        cur = px;
       }
-      cur = px;
+      if (i % SLICE === 0) yield;
     }
     emit(cur);
   }
   emit(eoi);
-  if (bits > 0) out.push(datum & 255);
-  return Uint8Array.from(out);
+  if (bits > 0) out[o++] = datum & 255;
+  return out.subarray(0, o);
 }
+
+export const lzwDecode = (minCode, data, count) => finish(lzwDecodeSteps(minCode, data, count));
+export const lzwEncode = (minCode, pixels) => finish(lzwEncodeSteps(minCode, pixels));
 
 // Interlaced frames store rows 0,8,16.. then 4,12.. then 2,6,10.. then 1,3,5..
 function deinterlace(px, w, h) {
@@ -854,7 +922,7 @@ function deinterlace(px, w, h) {
 
 // Walks the file: { width, height, headEnd, blocks }, each block either
 // { ext: [start, end] } (copied through as is) or a decoded image.
-function parse(bytes) {
+function* parseSteps(bytes) {
   const { width, height } = readSize(bytes);
   let p = 13 + tableLength(bytes[10]);
   const headEnd = p;
@@ -883,17 +951,18 @@ function parse(bytes) {
     const minCode = bytes[table[1]];
     if (!(minCode >= 2 && minCode <= 8)) throw new Error(`bad GIF code size ${minCode}`);
     const { data, end } = readSubBlocks(bytes, table[1] + 1);
-    let pixels = lzwDecode(minCode, data, w * h);
+    let pixels = yield* lzwDecodeSteps(minCode, data, w * h);
     if (packed & 0x40) pixels = deinterlace(pixels, w, h);
     blocks.push({ left, top, width: w, height: h, packed, table, minCode, pixels });
     p = end;
+    yield;
   }
   return { width, height, headEnd, blocks };
 }
 
 // The frames as palette indexes, for tests and debugging.
 export function decode(bytes) {
-  const g = parse(bytes);
+  const g = finish(parseSteps(bytes));
   return {
     width: g.width,
     height: g.height,
@@ -901,40 +970,54 @@ export function decode(bytes) {
   };
 }
 
-// The same animation, mirrored left to right. Colours, delays, disposal,
+// The same animation, mirrored left to right, as steps. Colours, delays, disposal,
 // transparency and looping are copied through untouched.
-export function flop(bytes) {
-  const g = parse(bytes);
-  const out = [];
-  const copy = (from, to) => { for (let i = from; i < to; i++) out.push(bytes[i]); };
-  const put16 = (v) => out.push(v & 255, (v >> 8) & 255);
-  copy(0, g.headEnd);
+export function* flopSteps(bytes) {
+  const g = yield* parseSteps(bytes);
+  const parts = [bytes.subarray(0, g.headEnd)];
   for (const b of g.blocks) {
     if (b.ext) {
-      copy(b.ext[0], b.ext[1]);
+      parts.push(bytes.subarray(b.ext[0], b.ext[1]));
       continue;
     }
     const { width: w, height: h, pixels } = b;
     for (let y = 0; y < h; y++) pixels.subarray(y * w, y * w + w).reverse();
-    out.push(0x2c);
-    put16(Math.max(0, g.width - b.left - w));
-    put16(b.top);
-    put16(w);
-    put16(h);
-    out.push(b.packed & ~0x40); // rows are written in order now
-    copy(b.table[0], b.table[1]);
-    out.push(b.minCode);
-    writeSubBlocks(out, lzwEncode(b.minCode, pixels));
+    const left = Math.max(0, g.width - b.left - w);
+    parts.push(Uint8Array.from([
+      0x2c, left & 255, left >> 8, b.top & 255, b.top >> 8, w & 255, w >> 8, h & 255, h >> 8,
+      b.packed & ~0x40, // rows are written in order now
+    ]));
+    parts.push(bytes.subarray(b.table[0], b.table[1]));
+    parts.push(Uint8Array.from([b.minCode]));
+    parts.push(subBlocks(yield* lzwEncodeSteps(b.minCode, pixels)));
+    yield;
   }
-  out.push(0x3b);
-  return Uint8Array.from(out);
+  parts.push(Uint8Array.from([0x3b]));
+  const out = new Uint8Array(parts.reduce((n, part) => n + part.length, 0));
+  let at = 0;
+  for (const part of parts) { out.set(part, at); at += part.length; }
+  return out;
+}
+
+// For small files and for tests: straight through, no breaks.
+export const flop = (bytes) => finish(flopSteps(bytes));
+
+// For use inside Herdr: `breathe` is awaited between slices. It must hand control
+// back to the app (any real asynchronous call does), or a big sprite is cut off.
+export async function flopAsync(bytes, breathe) {
+  const steps = flopSteps(bytes);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+    await breathe();
+  }
 }
 ```
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `node --test test/gif.test.mjs`
-Expected: PASS, `tests 15`, `fail 0`. On a machine without vscode-pets installed in an editor the last test reports `skipped 1`; that is fine.
+Expected: PASS, `tests 18`, `fail 0`. On a machine without vscode-pets installed in an editor the last test reports `skipped 1`; that is fine.
 
 - [ ] **Step 6: Commit**
 
@@ -1427,6 +1510,8 @@ Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `PETS` from `./pets.js` (Task 1).
 - Produces, from `mods/pets/store.js`:
+  - `applyCommand(state, command): Saved | null` — what `size-<name>`, `theme-<name>` and `remove-all` do; null for any other command.
+  - `DEFAULT_SIZE = "medium"`.
   - `KEY = "pets"`, `MAX_PETS = 20`, `SIZE_NAMES = ["nano","small","medium","large"]`, `THEMES = ["none","forest","castle","beach","winter","autumn","library"]`
   - `Saved = { pets: { id, type, color, name }[], size, theme }`
   - `load(raw: unknown): Saved` — sanitises whatever was stored.
@@ -1440,14 +1525,14 @@ Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>"
 ```js
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MAX_PETS, load, addPet, removePet, renamePet, removeAll, withSize, withTheme, floorFor, randomName, newId } from "../mods/pets/store.js";
+import { MAX_PETS, load, addPet, removePet, renamePet, removeAll, withSize, withTheme, floorFor, randomName, newId, applyCommand } from "../mods/pets/store.js";
 import { PETS } from "../mods/pets/pets.js";
 
 const rex = { id: "a", type: "dog", color: "brown", name: "Rex" };
 
 test("load gives defaults for nothing saved", () => {
-  assert.deepEqual(load(undefined), { pets: [], size: "nano", theme: "none" });
-  assert.deepEqual(load("garbage"), { pets: [], size: "nano", theme: "none" });
+  assert.deepEqual(load(undefined), { pets: [], size: "medium", theme: "none" });
+  assert.deepEqual(load("garbage"), { pets: [], size: "medium", theme: "none" });
 });
 
 test("load keeps good pets and drops broken ones", () => {
@@ -1456,7 +1541,7 @@ test("load keeps good pets and drops broken ones", () => {
     size: "huge",
     theme: "forest",
   });
-  assert.deepEqual(state, { pets: [rex], size: "nano", theme: "forest" });
+  assert.deepEqual(state, { pets: [rex], size: "medium", theme: "forest" }); // "huge" is not a size
 });
 
 test("load repairs a colour the pet does not come in and an empty name", () => {
@@ -1529,6 +1614,21 @@ test("load drops a pet whose type is not a string", () => {
     assert.deepEqual(load({ pets: [{ id: "x", type, color: "brown", name: "X" }, rex] }).pets, [rex], JSON.stringify(type));
   }
 });
+
+test("applyCommand changes size, theme and the list from a command's name", () => {
+  const state = load({ pets: [rex], size: "nano", theme: "none" });
+  assert.equal(applyCommand(state, "size-large").size, "large");
+  assert.equal(applyCommand(state, "theme-forest").theme, "forest");
+  assert.deepEqual(applyCommand(state, "remove-all").pets, []);
+  assert.deepEqual(applyCommand(state, "size-large").pets, [rex]); // the rest is kept
+});
+
+test("applyCommand gives null for a command that does not change the saved state", () => {
+  const state = load(undefined);
+  for (const command of ["spawn", "size-huge", "theme-space", "size-", "nonsense", "", undefined]) {
+    assert.equal(applyCommand(state, command), null, String(command));
+  }
+});
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1549,6 +1649,9 @@ export const KEY = "pets";
 export const MAX_PETS = 20;
 export const SIZE_NAMES = ["nano", "small", "medium", "large"];
 export const THEMES = ["none", "forest", "castle", "beach", "winter", "autumn", "library"];
+// Upstream starts at nano (30 px), sized for a wide editor panel. In a Herdr sidebar
+// that is too small to see, so this starts one step below upstream's largest.
+export const DEFAULT_SIZE = "medium";
 
 // Where the ground is in each theme's picture, px above the bottom (upstream themes.ts).
 const FLOORS = {
@@ -1591,7 +1694,7 @@ export function load(raw) {
   }
   return {
     pets,
-    size: SIZE_NAMES.includes(saved.size) ? saved.size : "nano",
+    size: SIZE_NAMES.includes(saved.size) ? saved.size : DEFAULT_SIZE,
     theme: THEMES.includes(saved.theme) ? saved.theme : "none",
   };
 }
@@ -1613,12 +1716,25 @@ export function renamePet(state, id, name) {
 export const removeAll = (state) => ({ ...state, pets: [] });
 export const withSize = (state, size) => (SIZE_NAMES.includes(size) ? { ...state, size } : state);
 export const withTheme = (state, theme) => (THEMES.includes(theme) ? { ...state, theme } : state);
+
+// What a key command does to the saved value: "size-<name>", "theme-<name>" or
+// "remove-all" ("pets.size-large" in keys.json). Null for any other command.
+export function applyCommand(state, command) {
+  const c = String(command ?? "");
+  if (c === "remove-all") return removeAll(state);
+  for (const [prefix, change] of [["size-", withSize], ["theme-", withTheme]]) {
+    if (!c.startsWith(prefix)) continue;
+    const next = change(state, c.slice(prefix.length));
+    return next === state ? null : next;
+  }
+  return null;
+}
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `node --test test/store.test.mjs`
-Expected: PASS, `tests 13`, `fail 0`.
+Expected: PASS, `tests 15`, `fail 0`.
 
 - [ ] **Step 5: Commit**
 
@@ -1798,7 +1914,7 @@ export function pngSize(bytes) {
 - [ ] **Step 4: Run all tests**
 
 Run: `npm test`
-Expected: PASS, `tests 71`, `fail 0`.
+Expected: PASS, `tests 76`, `fail 0`.
 
 - [ ] **Step 5: Commit**
 
@@ -1824,7 +1940,7 @@ Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>"
 - Consumes: `UPSTREAM_TAG` (Task 1); `readSize`, `flop`, `decode` (Task 2); `makeGif` (Task 2 helpers); `spritesFor` (Task 3); `EDITOR_DIRS`, `EXTENSION_ONLY`, `newestExtension`, `spriteName`, `leftName`, `rawUrl`, `themeFiles`, `pngSize` (Task 5). From Herdr, in `art.js` only: `exec`, `home`, `appHome`; `fs/promises`.
 - Produces, from `mods/pets/artcore.js`:
   - `DATA_REL = "data/pets"`
-  - `createArt({ exec, fs, home, appHome, now? }): { extensionMedia, loadPet, loadTheme }` where `exec(command, args, { timeout })` resolves `{ code, stdout, stderr }` and rejects when the program cannot start, and `fs` has `readFile`, `writeFile`, `readdir`, `exists`, `mkdir`, `unlink`.
+  - `createArt({ exec, fs, home, appHome, pause?, now? }): { extensionMedia, loadPet, loadTheme }` — `pause()` resolves after handing control back to the app; mirroring awaits it at least every 25 ms. where `exec(command, args, { timeout })` resolves `{ code, stdout, stderr }` and rejects when the program cannot start, and `fs` has `readFile`, `writeFile`, `readdir`, `exists`, `mkdir`, `unlink`.
 - Produces, from `mods/pets/art.js` (what `main.js` and `dialogs.js` import):
   - `DATA_REL`
   - `extensionMedia(): Promise<string | null>` — the newest installed extension's `media` folder.
@@ -1864,8 +1980,8 @@ const url = (rel) => rawUrl("1.37.0", rel);
 // Everything the code did is recorded. `clock.ms` is the time the code sees.
 function fake({ files = {}, web = {}, curl = true, slowReaddir = false } = {}) {
   const disk = new Map(Object.entries(files));
-  const calls = { curl: [], readdir: 0 };
-  const clock = { ms: 1000 };
+  const calls = { curl: [], readdir: 0, pause: 0 };
+  const clock = { ms: 1000, tick: false };
   const fs = {
     async exists(path) {
       return disk.has(path) || [...disk.keys()].some((k) => k.startsWith(`${path}/`));
@@ -1914,7 +2030,10 @@ function fake({ files = {}, web = {}, curl = true, slowReaddir = false } = {}) {
     if (disk.has(part)) disk.set(part, answer);
     return { code: 0, stdout: "200", stderr: "" };
   }
-  const art = createArt({ exec, fs, home: () => HOME, appHome: () => APP, now: () => clock.ms });
+  // Each look at the clock takes it 10 ms on, so mirroring sees time pass.
+  const now = () => (clock.tick ? (clock.ms += 10) : clock.ms);
+  const pause = async () => { calls.pause++; };
+  const art = createArt({ exec, fs, home: () => HOME, appHome: () => APP, pause, now });
   return { art, disk, calls, clock };
 }
 
@@ -2164,6 +2283,36 @@ test("a load that failed is tried again the next time", async () => {
   for (const rel of dogFiles("brown")) web[url(rel)] = GIF;
   assert.deepEqual(Object.keys((await art.loadPet("dog", "brown")).sprites).sort(), DOG);
 });
+
+test("mirroring a big sprite pauses for the app again and again", async () => {
+  const [w, h] = [300, 200];
+  const pixels = Array.from({ length: w * h }, (_, i) => ((i % w) * 7 + Math.floor(i / w)) % 4);
+  const big = makeGif({ width: w, height: h, palette: PALETTE, frames: [{ pixels }] });
+  const { art, calls, clock, disk } = fake({ files: extensionWith(dogFiles("brown"), big) });
+  clock.tick = true;
+  const meta = await art.loadPet("dog", "brown");
+  assert.equal(meta.sprites.walk.width, 300);
+  assert.ok(calls.pause >= 5, `${calls.pause} pauses`); // 5 sprites of several slices each
+  const left = decode(disk.get(`${CACHE}/dog/brown_walk_8fps.left.gif`)).frames[0].pixels;
+  assert.deepEqual([...left.subarray(0, 4)], pixels.slice(296, 300).reverse());
+});
+
+test("a small sprite is mirrored without pausing when no time has passed", async () => {
+  const { art, calls } = fake({ files: extensionWith(dogFiles("brown")) });
+  await art.loadPet("dog", "brown");
+  assert.equal(calls.pause, 0);
+});
+
+test("mirroring still pauses when the clock is set back", async () => {
+  const [w, h] = [300, 200];
+  const pixels = Array.from({ length: w * h }, (_, i) => ((i % w) * 7 + Math.floor(i / w)) % 4);
+  const big = makeGif({ width: w, height: h, palette: PALETTE, frames: [{ pixels }] });
+  const { art, calls, clock } = fake({ files: extensionWith(dogFiles("brown"), big) });
+  clock.ms -= 3600000; // an hour back, after the loader took its first reading
+  clock.tick = true; // and time goes on from there
+  await art.loadPet("dog", "brown");
+  assert.ok(calls.pause >= 5, `${calls.pause} pauses`);
+});
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -2186,7 +2335,7 @@ Expected: FAIL with `Cannot find module` … `mods/pets/artcore.js`.
 // write the same bytes to the same names.
 import { UPSTREAM_TAG } from "./pets.js";
 import { spritesFor } from "./engine.js";
-import { readSize, flop } from "./gif.js";
+import { readSize, flopAsync } from "./gif.js";
 import { EDITOR_DIRS, EXTENSION_ONLY, newestExtension, spriteName, leftName, rawUrl, themeFiles, pngSize } from "./sources.js";
 
 export const DATA_REL = "data/pets"; // image() paths are relative to ~/.config/herdr-app
@@ -2195,16 +2344,29 @@ const CURL_SECONDS = 20; // per attempt
 const EXEC_MS = 90000; // curl's three attempts and their pauses fit inside this
 const MAX_BYTES = 20_000_000; // no sprite or picture comes near this
 const RECHECK_MS = 30000; // how long "no extension installed" is believed
+// Herdr stops a script that runs about half a second without a break, and the stop
+// cannot be caught. Mirroring pauses at least this often, far inside that limit.
+const BREATH_MS = 25;
 
 const dirOf = (path) => path.slice(0, path.lastIndexOf("/"));
 const reason = (e) => String(e?.message ?? e);
 
 // io: { exec, fs, home, appHome } with the shapes of Herdr's `exec`, `fs/promises`,
-// `home()` and `appHome()`; `now` is the clock, for tests.
-export function createArt({ exec, fs, home, appHome, now = Date.now }) {
+// `home()` and `appHome()`. `pause` resolves after handing control back to the app
+// (any real asynchronous call does); `now` is the clock, for tests.
+export function createArt({ exec, fs, home, appHome, pause = async () => {}, now = Date.now }) {
   const has = (path) => fs.exists(path).catch(() => false);
   const remove = (path) => fs.unlink(path).catch(() => {});
   let downloads = 0;
+
+  // Awaited between slices of mirroring: a real pause once BREATH_MS has gone by.
+  let breathed = now();
+  async function breathe() {
+    const since = now() - breathed;
+    if (since >= 0 && since < BREATH_MS) return; // a clock set back still gets its pause
+    await pause();
+    breathed = now();
+  }
 
   // The media folder of the newest installed vscode-pets, or null. Once found it is
   // remembered; "none" is looked up again after a while, so installing the extension
@@ -2310,7 +2472,7 @@ export function createArt({ exec, fs, home, appHome, now = Date.now }) {
       }
       let left = name;
       try {
-        await fs.writeFile(`${dir}/${leftName(name)}`, flop(bytes));
+        await fs.writeFile(`${dir}/${leftName(name)}`, await flopAsync(bytes, breathe));
         left = leftName(name);
       } catch (e) {
         // One odd file shouldn't cost the pet: it walks backwards in this state.
@@ -2375,14 +2537,18 @@ import { exec, home, appHome } from "herdr";
 import * as fs from "fs/promises";
 import { createArt, DATA_REL } from "./artcore.js";
 
+// Asking the app a question and waiting for the answer hands control back to it,
+// which is what a long piece of work must do every so often.
+const pause = () => fs.exists(appHome()).catch(() => false);
+
 export { DATA_REL };
-export const { extensionMedia, loadPet, loadTheme } = createArt({ exec, fs, home, appHome });
+export const { extensionMedia, loadPet, loadTheme } = createArt({ exec, fs, home, appHome, pause });
 ```
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `node --test test/artcore.test.mjs`
-Expected: PASS, `tests 27`, `fail 0`.
+Expected: PASS, `tests 30`, `fail 0`.
 
 - [ ] **Step 6: Syntax-check and confirm the pure modules stayed pure**
 
@@ -2392,7 +2558,7 @@ grep -l -E "from \"(herdr|gpui-kit|gpui-base|fs/promises)\"" mods/pets/*.js
 npm test
 ```
 
-Expected: `ok`; the grep lists exactly `mods/pets/art.js` (after Task 7 also `dialogs.js` and `main.js`), and never `artcore.js`, `engine.js`, `gif.js`, `store.js`, `sources.js` or `pets.js`; `npm test` reports `tests 98`, `fail 0`.
+Expected: `ok`; the grep lists exactly `mods/pets/art.js` (after Task 7 also `dialogs.js` and `main.js`), and never `artcore.js`, `engine.js`, `gif.js`, `store.js`, `sources.js` or `pets.js`; `npm test` reports `tests 106`, `fail 0`.
 
 - [ ] **Step 7: Commit**
 
@@ -2420,7 +2586,7 @@ Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>"
   - `mods/pets/roster.js` (pure): `referenceSize(sprites, box): { w, h }`; `reconcile(live, saved, spritesOf, box, env, now, rng): boolean` (changes `live` in place; true when a redraw is needed); `hover(pet, sprites, env, now, rng): boolean`; `drawing(pet, sprites, box, now): { x, y, moveX, moveY, sprite: { path, w, h } | null, w, h, bubble }`.
   - `mods/pets/dialogs.js`: `MOD = "pets"`, `DIALOGS = { picker, rename, menu }` (each `{ init(view, cx), render(view, cx) }`), `openPicker()`, `openRename(petId)`, `openMenu({ menu: "ground" } | { menu: "pet", pet: id })`.
   - `mods/pets/main.js`: default export `class Pets extends View`.
-  - Commands `pets.spawn` and `pets.remove-all`.
+  - Commands `pets.spawn`, `pets.remove-all`, `pets.size-<name>` and `pets.theme-<name>`.
   - Saved value under `shared("pets")`, shape `Saved` from Task 4.
 
 Read `~/.config/herdr-app/AGENTS.md` ("Mods", "A mod", "UI", "The `herdr` module") before changing this code. The type files beside it are the truth for every builder name.
@@ -2636,7 +2802,7 @@ Expected: PASS, `tests 12`, `fail 0`.
 `mods/pets/mod.json`:
 
 ```json
-{ "place": "left", "size": 220 }
+{ "place": "none", "title": "Pets" }
 ```
 
 - [ ] **Step 2: Write the dialogs**
@@ -2682,7 +2848,7 @@ const picker = {
     v.filter = "";
     v.type = null;
     v.color = null;
-    v.busy = false;
+    v.busy = 0; // when the fetch in progress started, or 0
     v.error = "";
     v.extension = null; // null: not known yet
     v.search = InputState.new({ placeholder: "Search pets…" });
@@ -2705,25 +2871,27 @@ const picker = {
   },
 
   add(v, cx) {
-    if (v.busy || !v.type || load(shared(KEY)).pets.length >= MAX_PETS) return;
+    // A fetch that has said nothing for two minutes is dead: let Add start another.
+    if (v.busy && Date.now() - v.busy < 120000) return;
+    if (!v.type || load(shared(KEY)).pets.length >= MAX_PETS) return;
     const pet = {
       id: newId(Date.now(), Math.random),
       type: v.type,
       color: v.color,
       name: v.name.value().trim() || randomName(v.type, Math.random),
     };
-    v.busy = true;
+    const started = (v.busy = Date.now());
     v.error = "";
     cx.notify();
     cx.spawn(async (cx) => {
       try {
         await loadPet(pet.type, pet.color); // no sprites, no pet
-        if (v.closed) return; // closed while it fetched: the person changed their mind
+        if (v.closed || v.busy !== started) return; // closed, or a later try took over
         save((s) => addPet(s, pet));
         close();
       } catch (e) {
-        if (v.closed) return;
-        v.busy = false;
+        if (v.closed || v.busy !== started) return;
+        v.busy = 0;
         v.error = String(e?.message ?? e);
         notify({ title: `Couldn't add the ${pretty(pet.type).toLowerCase()}`, body: v.error, level: "error" });
         cx.notify();
@@ -2862,7 +3030,7 @@ import { shared, setShared, theme, settings, props, notify, nextCommand } from "
 import { PETS } from "./pets.js";
 import { SIZES } from "./engine.js";
 import { reconcile, hover, drawing } from "./roster.js";
-import { KEY, load, floorFor, removeAll } from "./store.js";
+import { KEY, load, floorFor, applyCommand } from "./store.js";
 import { loadPet, loadTheme } from "./art.js";
 import { DIALOGS, openPicker, openMenu } from "./dialogs.js";
 
@@ -2870,12 +3038,15 @@ import { DIALOGS, openPicker, openMenu } from "./dialogs.js";
 // when a pet starts a new leg. Motion itself is Herdr's native transition.
 const CHECK_MS = 200;
 const RETRY_MS = 60000; // a failed download is tried again after this long
+// A load that has said nothing for this long is taken for dead (Herdr can stop a
+// script without telling it) and is started again.
+const STALL_MS = 120000;
 const SNAP_MS = 150; // a change of place that is not a walk or a climb
 const BUBBLE_H = 20;
 const zoom = () => (Number(settings()?.zoom) > 0 ? Number(settings().zoom) : 1);
 const artKey = (pet) => `${pet.type}/${pet.color}`;
-// A cache entry that holds a loaded value: not "loading", not a failure.
-const loaded = (entry) => (entry && entry !== "loading" && !entry.error ? entry : null);
+// A cache entry that holds a loaded value: not one still loading, not a failure.
+const loaded = (entry) => (entry && !entry.pending && !entry.error ? entry : null);
 
 export default class Pets extends View {
   init(_p, cx) {
@@ -2887,16 +3058,18 @@ export default class Pets extends View {
     this.height = 300;
     this.env = { width: this.width, height: this.height, floor: 0 };
     this.live = {}; // pet id -> the engine's pet
-    this.art = {}; // "type/colour" -> sprites | "loading" | { error, at }
-    this.scenes = {}; // "theme/kind/size" -> pictures | "loading" | { error, at }
+    this.art = {}; // "type/colour" -> sprites | { pending: <since> } | { error, at }
+    this.scenes = {}; // "theme/kind/size" -> pictures | { pending } | { error, at }
     cx.timer.every(CHECK_MS, (cx) => this.check(cx));
-    // keys.json can bind "pets.spawn" and "pets.remove-all".
+    // keys.json can bind "pets.spawn", "pets.remove-all", "pets.size-<name>" and
+    // "pets.theme-<name>".
     cx.spawn(async () => {
       for (;;) {
         const c = await nextCommand();
         try {
-          if (c === "spawn") openPicker();
-          else if (c === "remove-all") setShared(KEY, removeAll(load(shared(KEY))));
+          const next = applyCommand(load(shared(KEY)), c);
+          if (next) setShared(KEY, next);
+          else if (c === "spawn") openPicker();
         } catch (e) {
           console.log(`pets: command ${c} failed: ${e?.message ?? e}`); // and keep listening
         }
@@ -2912,17 +3085,20 @@ export default class Pets extends View {
   // Loads in the background; `job` resolves with the value or rejects with the reason.
   want(cache, key, job, failed, cx) {
     const cur = cache[key];
-    if (cur === "loading" || (cur && !cur.error)) return;
+    if (loaded(cur)) return;
+    if (cur?.pending && Date.now() - cur.pending < STALL_MS) return;
     if (cur?.error && Date.now() - cur.at < RETRY_MS) return;
     const first = !cur;
-    cache[key] = "loading";
+    const mine = (cache[key] = { pending: Date.now() });
     cx.spawn(async (cx) => {
+      let result;
       try {
-        cache[key] = await job();
+        result = await job();
       } catch (e) {
-        cache[key] = { error: String(e?.message ?? e), at: Date.now() };
-        if (first) notify({ title: failed, body: cache[key].error, level: "warning" });
+        result = { error: String(e?.message ?? e), at: Date.now() };
+        if (first) notify({ title: failed, body: result.error, level: "warning" });
       }
+      if (cache[key] === mine) cache[key] = result; // not if a later try took over
       cx.notify();
     });
   }
@@ -3072,7 +3248,7 @@ If it prints `check failed`, the message names the builder or import that is wro
 - [ ] **Step 5: Run the unit tests again**
 
 Run: `npm test`
-Expected: PASS, `tests 110`, `fail 0`.
+Expected: PASS, `tests 118`, `fail 0`.
 
 - [ ] **Step 6: Commit**
 
@@ -3104,19 +3280,32 @@ Expected: JSON with `"errors": []`. Write down the `"layout"` value. Herdr docks
 
 - [ ] **Step 2: Put the mod where Herdr looks**
 
+Herdr reloads a mod when a file inside its own `mods/` folder changes. It does not follow a symlink out of that folder: a linked mod keeps running the code it first loaded. So copy the mod in, and run the same script after every edit for the rest of the task.
+
+`scripts/sync-to-herdr.sh`:
+
+```sh
+#!/bin/sh
+# Copies the mod into the Herdr app's folder for a live trial. Herdr reloads a mod when
+# a file inside its own mods folder changes; it does not follow a symlink out of it.
+set -eu
+cd "$(dirname "$0")/.."
+rsync -a --delete --exclude gpui-kit.d.ts --exclude jsconfig.json mods/pets/ "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/pets/"
+echo "synced mods/pets to ${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/pets"
+```
+
 ```bash
-test -e ~/.config/herdr-app/mods/pets && echo "ALREADY EXISTS: stop and ask the owner" || ln -s "$PWD/mods/pets" ~/.config/herdr-app/mods/pets
+test -e ~/.config/herdr-app/mods/pets && echo "ALREADY EXISTS: stop and ask the owner" || { chmod +x scripts/sync-to-herdr.sh && scripts/sync-to-herdr.sh; }
 sleep 2 && herdr-app status
 ```
 
-Expected: `"errors": []`, and a narrow panel on the left of the window reading "No pets yet. Click + to add one."
+Expected: `"errors": []`. The mod does not dock itself (`"place": "none"`), so add its block to the shown layout, in the sidebar column just above the footer, after telling the owner:
 
-If Herdr does not pick up a linked folder (no panel after a few seconds, nothing in `status`), replace the link with a copy and use this sync command after every edit for the rest of the task:
-
-```bash
-rm ~/.config/herdr-app/mods/pets
-rsync -a --delete --exclude gpui-kit.d.ts --exclude jsconfig.json mods/pets/ ~/.config/herdr-app/mods/pets/
+```json
+{ "id": "pets", "type": "block", "content": { "mod": "pets" }, "size": { "px": 110 } }
 ```
+
+Expected: a small panel between the agents list and the footer reading "No pets yet. Click + to add one."
 
 - [ ] **Step 3: Screenshot the empty panel**
 
@@ -3157,6 +3346,9 @@ If the dog faces the wrong way while moving, the `.left.gif` files are not being
 6. Add a **Crab**. While it downloads or copies, a 🦀 emoji stands in its place.
 
 Take `herdr-app shot shots/04-theme.png` during item 2 and read it.
+
+7. Add **Totoro**. Expected: "Fetching…" for some seconds while the window stays responsive and the other pets keep moving, then Totoro appears. `ls ~/.config/herdr-app/data/pets/totoro/` lists a `.left.gif` beside each of its eight sprites. If only the first sprite is there, the mirroring was cut off: a script ran too long without a pause.
+8. Run `herdr-app do pets.size-small`. Expected: every pet is smaller at once.
 
 - [ ] **Step 7: Check a redraw does not disturb a walking pet, and feet stay on the ground**
 
@@ -3231,14 +3423,23 @@ The pets are decoration. They are not tied to your agents.
 
 ## Install
 
-Ask your agent in Herdr to add this repository as a mod, or copy the folder yourself:
+Ask your agent in Herdr to add this repository as a mod. It will copy the folder and
+put the panel in your sidebar. To do it by hand:
 
 ```sh
 cp -R mods/pets ~/.config/herdr-app/mods/pets
 ```
 
-Herdr docks the panel on the left the first time it sees the folder. Move it by
-editing your layout.
+Then add a block for it to your layout (`~/.config/herdr-app/layouts/<name>.json`).
+It sits well in the sidebar column, just above the footer:
+
+```json
+{ "id": "pets", "type": "block", "content": { "mod": "pets" }, "size": { "px": 110 } }
+```
+
+The mod does not dock itself: a panel Herdr docks on its own becomes a full-height
+column, which is far more room than a few pets need. Give the block 160 px or more
+if you want the cat, Totoro and the squirrel to climb the wall.
 
 **What it does on your machine.** To get the sprites, the mod reads your editors'
 extension folders (`~/.vscode/extensions`, `~/.vscode-insiders/extensions`,
@@ -3254,9 +3455,16 @@ runs no other program. Sprites are cached in `~/.config/herdr-app/data/pets/`.
 - **Right-click a pet** to rename or remove it.
 - **Right-click the ground** to add a pet, pick a theme (forest, castle, beach,
   winter, autumn, library), pick a size (nano, small, medium, large) or remove all.
-- For keys, bind `pets.spawn` and `pets.remove-all` in `~/.config/herdr-app/keys.json`.
+- For keys, bind any of `pets.spawn`, `pets.remove-all`, `pets.size-<nano|small|medium|large>`
+  and `pets.theme-<none|forest|castle|beach|winter|autumn|library>` in
+  `~/.config/herdr-app/keys.json`. The same commands work from a shell:
+  `herdr-app do pets.size-small`.
 
-Up to 20 pets. Your pets, the size and the theme are remembered.
+Up to 20 pets. Your pets, the size and the theme are remembered. Pets start at
+medium (55 px).
+
+The first time you add a big pet (Totoro, the grey raccoon) it takes several seconds:
+its mirrored sprites are made on your machine, in small steps so Herdr stays responsive.
 
 ## Where the art comes from
 
@@ -3280,9 +3488,13 @@ export/import of the pet list.
 ## Develop
 
 ```sh
-npm test    # node --test, no Herdr needed; Node 22 or newer
+npm test                     # node --test, no Herdr needed; Node 22 or newer
 herdr-app check mods/pets
+scripts/sync-to-herdr.sh     # copy the mod into Herdr to try it live
 ```
+
+Herdr reloads a mod when a file inside its own `mods/` folder changes. It does not
+follow a symlink out of that folder, so work in the repo and sync.
 
 `mods/pets/pets.js` is generated. To rebuild it for a new VS Code Pets release:
 
@@ -3307,7 +3519,7 @@ Herdr's format: what the person sees first, code only in "Built from" and "Watch
 ````markdown
 # Pets
 
-A sidebar panel where the VS Code Pets animals live. The person adds pets with a +
+A small sidebar panel where the VS Code Pets animals live. The person adds pets with a +
 button, each with an animal, a colour and a name. Pets idle, walk, run, lie down and
 (cat, totoro, squirrel) climb the left wall, each following its own sequence from VS
 Code Pets. They are decoration and know nothing about agents.
@@ -3316,11 +3528,13 @@ Code Pets. They are decoration and know nothing about agents.
 
 ## What you see
 
-- One block, docked left at 220 px wide (`mod.json`: `{ "place": "left", "size": 220 }`),
-  filling its height. Background `theme().chrome`.
+- One block in the sidebar column, just above its footer, 110 px high and as wide as
+  the sidebar: `{ "id": "pets", "type": "block", "content": { "mod": "pets" }, "size": { "px": 110 } }`.
+  `mod.json` is `{ "place": "none", "title": "Pets" }`: the mod does not dock itself,
+  because a self-docked mod becomes a full-height column. Background `theme().chrome`.
 - Pets stand on the bottom edge, or on the theme's ground line. Each is its animated
   GIF, drawn inside a square box and never enlarged: nano 30 px, small 40, medium 55,
-  large 110. Default nano.
+  large 110. Default medium.
 - A muted `+` (20 px, `theme().muted`) at top 6, right 8.
 - With no pets, centred `theme().dim` 12 px text: "No pets yet. Click + to add one."
 - With a theme (forest, castle, beach, winter, autumn, library) its background picture
@@ -3349,7 +3563,8 @@ Code Pets. They are decoration and know nothing about agents.
 - Right-click a pet: popup with "<name> the <animal>", Rename… (a dialog), Remove.
 - Right-click the ground: popup with Add pet…, Theme (7, the current one ticked), Size
   (4, ticked), Remove all.
-- Commands `pets.spawn` (opens the dialog) and `pets.remove-all`. No keys are shipped.
+- Commands `pets.spawn` (opens the dialog), `pets.remove-all`, `pets.size-<name>` and
+  `pets.theme-<name>`. No keys are shipped.
 - Pets, size and theme are saved; positions are not. After a restart pets start at a
   random spot.
 
@@ -3390,6 +3605,17 @@ Code Pets. They are decoration and know nothing about agents.
 ## Watch out
 
 - There is no flip or mirror in the UI kit. Left-facing sprites must be files.
+- Herdr stops a script that runs about half a second without a break (400 ms passes,
+  800 ms is stopped), and `try`/`catch` does not see it. Mirroring a big sprite
+  (Totoro's is 27 frames of 600 x 396) takes seconds. So `gif.js` works in steps of
+  16384 pixels, about 5 ms each, and `artcore.js` awaits a real host call
+  (`fs.exists`) between them at least every 25 ms. Without this the load dies silently
+  and the dialog says "Fetching…" for ever.
+- A load that has said nothing for two minutes is started again.
+- Herdr reloads a mod only when a file inside its own `mods/` folder changes. A
+  symlinked mod folder keeps running the old code.
+- The panel is 110 px high. Climbing needs the climb height (100 px) plus the pet's
+  height: about 160 px at medium. In a shorter panel pets never pick the wall.
 - A mod's `fetch` returns only text or JSON, so binary downloads need `curl`.
 - Cat, frog, bunny and squirrel are not in the VS Code Pets GitHub repository. Without
   the extension they are greyed out in the dialog and cannot be added.
@@ -3420,7 +3646,10 @@ Code Pets. They are decoration and know nothing about agents.
 - `+`, pick dog, Add: a dog appears on the ground and walks to the right edge and back,
   its feet on the ground the whole way, also right after lying down.
 - Pointing at it stops it for 1.5 s with a 👋 above it, then it carries on.
-- A cat climbs the left wall, hangs and jumps down in a panel taller than 130 px.
+- A cat climbs the left wall, hangs and jumps down in a panel 160 px or taller.
+- Adding Totoro shows "Fetching…" for some seconds, the window stays responsive, and
+  Totoro appears.
+- `herdr-app do pets.size-small` makes every pet smaller at once.
 - Right-click the ground, Theme, Forest: the forest appears and pets stand on its ground.
 - Right-click a pet, Rename…, type a name, Enter: the menu header shows the new name.
 - Quit and reopen Herdr: the same pets, size and theme are there.
