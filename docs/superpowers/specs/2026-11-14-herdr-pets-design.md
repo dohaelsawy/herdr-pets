@@ -1,7 +1,7 @@
 # herdr-pets: design
 
 Date: 2026-11-14
-Status: approved in brainstorming, awaiting spec review
+Status: approved. Amended while planning (see Amendments).
 
 ## Summary
 
@@ -87,9 +87,12 @@ Out of v1:
 ```
 herdr-pets/
   mods/pets/
-    main.js     panel view: render, input, commands, timers, saved state, overlays
+    main.js     panel view: render, input, commands, the leg check; a dialog when opened with props().role
+    dialogs.js  the picker, the rename prompt and the right-click menus
     engine.js   pure: plans legs from a pet's state, table and panel size
     pets.js     generated data: per-type table, colours, names, speed, emoji
+    store.js    pure: the saved value (pets, size, theme) and its changes
+    sources.js  pure: sprite file names, URLs, version compare, drawn sizes
     art.js      locates, fetches and caches sprites; calls gif.js
     gif.js      pure: reads GIF dimensions, writes a horizontally mirrored GIF
     mod.json    { "place": "left", "size": 220 }
@@ -100,12 +103,12 @@ herdr-pets/
 
 Boundaries:
 
-- `engine.js` and `gif.js` import nothing from `herdr` or `gpui-kit`. They take
-  values and return values, and run under `node --test`.
+- `engine.js`, `gif.js`, `store.js` and `sources.js` import nothing from `herdr`
+  or `gpui-kit`. They take values and return values, and run under `node --test`.
 - `pets.js` is data only and is never edited by hand.
 - `art.js` is the only module that reaches the network or reads outside the
   mod's folder.
-- `main.js` owns every Herdr call.
+- `main.js` and `dialogs.js` own every drawing and state call to Herdr.
 
 Sprite cache: `~/.config/herdr-app/data/pets/`.
 
@@ -128,8 +131,9 @@ Sprites are fetched per pet, on first spawn.
      distributions; it is the mod's only external program, and is needed only
      when no extension is installed.
 3. **Mirror.** For each file write `<colour>_<spriteLabel>_8fps.left.gif` and
-   record width and height in a per-colour `meta.json`. The meta carries a recipe
-   version so a changed recipe rebuilds the cache.
+   record width and height in a per-colour `<colour>.json`. It carries a recipe
+   version so a changed recipe rebuilds the cache. `curl -f` exits 22 on HTTP 404,
+   which marks an animation that pet does not have; any other failure is an error.
 4. **Themes.** Fetch `backgrounds/<theme>/background-<dark|light>-<size>.png` and
    the matching `foreground-…` on first use of that theme, size and appearance.
 
@@ -142,7 +146,7 @@ Sprites are fetched per pet, on first spawn.
   transparency and loop count pass through unchanged. Interlaced frames are
   de-interlaced on decode and written non-interlaced.
 
-Availability: with an extension installed, all 26 types are offered. Without
+Availability: with an extension installed, all 27 types are offered. Without
 one, cat, frog, bunny and squirrel are greyed out in the picker with the line
 "Needs the vscode-pets extension installed in an editor."
 
@@ -173,8 +177,10 @@ Rules:
   from upstream `states.ts` at the pinned tag.
 - Right edge = panel width × 0.95 − sprite width, as upstream. Left edge = 0.
 - A pet with speed 0 (rocky) holds in place for the walk state's hold time.
-- When a leg ends, `main.js` fires a one-shot timer; the engine picks uniformly
-  at random among the current state's next states and plans the next leg.
+- `main.js` checks every 200 ms whether a pet's leg has ended. The check is
+  arithmetic only; the panel is redrawn only when a pet starts a new leg. The
+  engine picks at random among the current state's next states (upstream repeats
+  a state in the list to weight it) and plans the next leg.
 - If the panel is shorter than climb height plus sprite height, wall states are
   removed from the candidates for that pick. If nothing remains, use the
   starting state.
@@ -183,8 +189,8 @@ Rules:
   there, then replans the interrupted state from that position.
 - Resize: any leg whose target is outside the new bounds is replanned from the
   pet's current position.
-- Sprite width by size: nano 30, small 40, medium 55, large 110. Height keeps
-  the GIF's aspect ratio.
+- Sprite box by size: nano 30, small 40, medium 55, large 110. A sprite is drawn
+  inside the box at its own aspect ratio and is never enlarged, as upstream.
 - Ground line: the theme's floor height for the size (upstream `themes.ts`);
   0 with no theme.
 
@@ -196,8 +202,11 @@ deterministic.
 - Root element reports its size with `on_size_change`; all layout derives from it.
 - Layers back to front: theme background, pets, theme foreground, the + button.
   With no theme the panel uses `theme()` colours.
-- Each pet is an absolutely positioned `image()` with
-  `.transition("left" | "top", { duration, easing: "linear" })`.
+- Each pet is an absolutely positioned element holding an `image()`, placed at
+  its leg's end with `.transition("left" | "top", { duration, easing: "linear" })`,
+  where `duration` is the time left in the leg.
+- A theme's background and foreground pictures repeat along the bottom edge, as
+  upstream.
 - Empty state: "No pets yet. Click + to add one."
 - **+** (top right, muted): opens the picker as a dialog overlay of this mod
   (`openOverlay({ mod: "pets", props: { picker: true }, kind: "dialog" })`).
@@ -228,7 +237,7 @@ deterministic.
 
 `node --test`, no Herdr required:
 
-- **Tables:** for all 26 types, every state has a planner, every next state
+- **Tables:** for all 27 types, every state has a planner, every next state
   exists as a row, the starting state exists, no dropped state remains.
 - **Engine:** leg distance and duration; right-edge rule; speed-0 hold; hover
   position mid-leg and resume; short panel excludes wall states; resize replans;
@@ -257,3 +266,21 @@ In Herdr:
   need the extension, credits.
 - Publish as a public GitHub repo with the topic `herdr-mod`. Publishing happens
   only on the owner's explicit go-ahead.
+
+## Amendments
+
+Made on 2026-11-14 while writing the implementation plan, after drafting and
+testing the modules:
+
+- Upstream 1.37.0 has 27 pet types, not 26 (raccoon). 23 are on GitHub.
+- Three modules were added to keep files small and testable: `store.js`,
+  `sources.js`, `dialogs.js`.
+- Leg ends are detected by a 200 ms check, not a one-shot timer per leg. It is the
+  pattern the local `pokemon-agents` mod uses, it also covers resize, added and
+  removed pets and late-arriving sprites, and it redraws only on a change.
+- A pet with no sprites yet stands still as its emoji; it starts moving when they
+  arrive.
+- Per-pet behaviour that upstream keeps in code is carried as data in the
+  generated tables: swipe bubbles (finley, horse, skeleton, squirrel) and the
+  squirrel's speed, climb and fall.
+
