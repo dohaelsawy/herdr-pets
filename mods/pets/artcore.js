@@ -8,7 +8,7 @@
 // write the same bytes to the same names.
 import { UPSTREAM_TAG } from "./pets.js";
 import { spritesFor } from "./engine.js";
-import { readSize, flop } from "./gif.js";
+import { readSize, flopAsync } from "./gif.js";
 import { EDITOR_DIRS, EXTENSION_ONLY, newestExtension, spriteName, leftName, rawUrl, themeFiles, pngSize } from "./sources.js";
 
 export const DATA_REL = "data/pets"; // image() paths are relative to ~/.config/herdr-app
@@ -17,16 +17,28 @@ const CURL_SECONDS = 20; // per attempt
 const EXEC_MS = 90000; // curl's three attempts and their pauses fit inside this
 const MAX_BYTES = 20_000_000; // no sprite or picture comes near this
 const RECHECK_MS = 30000; // how long "no extension installed" is believed
+// Herdr stops a script that runs about half a second without a break, and the stop
+// cannot be caught. Mirroring pauses at least this often, far inside that limit.
+const BREATH_MS = 25;
 
 const dirOf = (path) => path.slice(0, path.lastIndexOf("/"));
 const reason = (e) => String(e?.message ?? e);
 
 // io: { exec, fs, home, appHome } with the shapes of Herdr's `exec`, `fs/promises`,
-// `home()` and `appHome()`; `now` is the clock, for tests.
-export function createArt({ exec, fs, home, appHome, now = Date.now }) {
+// `home()` and `appHome()`. `pause` resolves after handing control back to the app
+// (any real asynchronous call does); `now` is the clock, for tests.
+export function createArt({ exec, fs, home, appHome, pause = async () => {}, now = Date.now }) {
   const has = (path) => fs.exists(path).catch(() => false);
   const remove = (path) => fs.unlink(path).catch(() => {});
   let downloads = 0;
+
+  // Awaited between slices of mirroring: a real pause once BREATH_MS has gone by.
+  let breathed = now();
+  async function breathe() {
+    if (now() - breathed < BREATH_MS) return;
+    await pause();
+    breathed = now();
+  }
 
   // The media folder of the newest installed vscode-pets, or null. Once found it is
   // remembered; "none" is looked up again after a while, so installing the extension
@@ -132,7 +144,7 @@ export function createArt({ exec, fs, home, appHome, now = Date.now }) {
       }
       let left = name;
       try {
-        await fs.writeFile(`${dir}/${leftName(name)}`, flop(bytes));
+        await fs.writeFile(`${dir}/${leftName(name)}`, await flopAsync(bytes, breathe));
         left = leftName(name);
       } catch (e) {
         // One odd file shouldn't cost the pet: it walks backwards in this state.

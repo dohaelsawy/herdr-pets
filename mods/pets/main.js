@@ -14,12 +14,15 @@ import { DIALOGS, openPicker, openMenu } from "./dialogs.js";
 // when a pet starts a new leg. Motion itself is Herdr's native transition.
 const CHECK_MS = 200;
 const RETRY_MS = 60000; // a failed download is tried again after this long
+// A load that has said nothing for this long is taken for dead (Herdr can stop a
+// script without telling it) and is started again.
+const STALL_MS = 120000;
 const SNAP_MS = 150; // a change of place that is not a walk or a climb
 const BUBBLE_H = 20;
 const zoom = () => (Number(settings()?.zoom) > 0 ? Number(settings().zoom) : 1);
 const artKey = (pet) => `${pet.type}/${pet.color}`;
-// A cache entry that holds a loaded value: not "loading", not a failure.
-const loaded = (entry) => (entry && entry !== "loading" && !entry.error ? entry : null);
+// A cache entry that holds a loaded value: not one still loading, not a failure.
+const loaded = (entry) => (entry && !entry.pending && !entry.error ? entry : null);
 
 export default class Pets extends View {
   init(_p, cx) {
@@ -31,8 +34,8 @@ export default class Pets extends View {
     this.height = 300;
     this.env = { width: this.width, height: this.height, floor: 0 };
     this.live = {}; // pet id -> the engine's pet
-    this.art = {}; // "type/colour" -> sprites | "loading" | { error, at }
-    this.scenes = {}; // "theme/kind/size" -> pictures | "loading" | { error, at }
+    this.art = {}; // "type/colour" -> sprites | { pending: <since> } | { error, at }
+    this.scenes = {}; // "theme/kind/size" -> pictures | { pending } | { error, at }
     cx.timer.every(CHECK_MS, (cx) => this.check(cx));
     // keys.json can bind "pets.spawn" and "pets.remove-all".
     cx.spawn(async () => {
@@ -56,17 +59,20 @@ export default class Pets extends View {
   // Loads in the background; `job` resolves with the value or rejects with the reason.
   want(cache, key, job, failed, cx) {
     const cur = cache[key];
-    if (cur === "loading" || (cur && !cur.error)) return;
+    if (loaded(cur)) return;
+    if (cur?.pending && Date.now() - cur.pending < STALL_MS) return;
     if (cur?.error && Date.now() - cur.at < RETRY_MS) return;
     const first = !cur;
-    cache[key] = "loading";
+    const mine = (cache[key] = { pending: Date.now() });
     cx.spawn(async (cx) => {
+      let result;
       try {
-        cache[key] = await job();
+        result = await job();
       } catch (e) {
-        cache[key] = { error: String(e?.message ?? e), at: Date.now() };
-        if (first) notify({ title: failed, body: cache[key].error, level: "warning" });
+        result = { error: String(e?.message ?? e), at: Date.now() };
+        if (first) notify({ title: failed, body: result.error, level: "warning" });
       }
+      if (cache[key] === mine) cache[key] = result; // not if a later try took over
       cx.notify();
     });
   }

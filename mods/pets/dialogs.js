@@ -36,7 +36,7 @@ const picker = {
     v.filter = "";
     v.type = null;
     v.color = null;
-    v.busy = false;
+    v.busy = 0; // when the fetch in progress started, or 0
     v.error = "";
     v.extension = null; // null: not known yet
     v.search = InputState.new({ placeholder: "Search pets…" });
@@ -59,25 +59,27 @@ const picker = {
   },
 
   add(v, cx) {
-    if (v.busy || !v.type || load(shared(KEY)).pets.length >= MAX_PETS) return;
+    // A fetch that has said nothing for two minutes is dead: let Add start another.
+    if (v.busy && Date.now() - v.busy < 120000) return;
+    if (!v.type || load(shared(KEY)).pets.length >= MAX_PETS) return;
     const pet = {
       id: newId(Date.now(), Math.random),
       type: v.type,
       color: v.color,
       name: v.name.value().trim() || randomName(v.type, Math.random),
     };
-    v.busy = true;
+    const started = (v.busy = Date.now());
     v.error = "";
     cx.notify();
     cx.spawn(async (cx) => {
       try {
         await loadPet(pet.type, pet.color); // no sprites, no pet
-        if (v.closed) return; // closed while it fetched: the person changed their mind
+        if (v.closed || v.busy !== started) return; // closed, or a later try took over
         save((s) => addPet(s, pet));
         close();
       } catch (e) {
-        if (v.closed) return;
-        v.busy = false;
+        if (v.closed || v.busy !== started) return;
+        v.busy = 0;
         v.error = String(e?.message ?? e);
         notify({ title: `Couldn't add the ${pretty(pet.type).toLowerCase()}`, body: v.error, level: "error" });
         cx.notify();

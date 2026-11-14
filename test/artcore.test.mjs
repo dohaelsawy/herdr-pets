@@ -26,8 +26,8 @@ const url = (rel) => rawUrl("1.37.0", rel);
 // Everything the code did is recorded. `clock.ms` is the time the code sees.
 function fake({ files = {}, web = {}, curl = true, slowReaddir = false } = {}) {
   const disk = new Map(Object.entries(files));
-  const calls = { curl: [], readdir: 0 };
-  const clock = { ms: 1000 };
+  const calls = { curl: [], readdir: 0, pause: 0 };
+  const clock = { ms: 1000, tick: false };
   const fs = {
     async exists(path) {
       return disk.has(path) || [...disk.keys()].some((k) => k.startsWith(`${path}/`));
@@ -76,7 +76,10 @@ function fake({ files = {}, web = {}, curl = true, slowReaddir = false } = {}) {
     if (disk.has(part)) disk.set(part, answer);
     return { code: 0, stdout: "200", stderr: "" };
   }
-  const art = createArt({ exec, fs, home: () => HOME, appHome: () => APP, now: () => clock.ms });
+  // Each look at the clock takes it 10 ms on, so mirroring sees time pass.
+  const now = () => (clock.tick ? (clock.ms += 10) : clock.ms);
+  const pause = async () => { calls.pause++; };
+  const art = createArt({ exec, fs, home: () => HOME, appHome: () => APP, pause, now });
   return { art, disk, calls, clock };
 }
 
@@ -325,4 +328,23 @@ test("a load that failed is tried again the next time", async () => {
   await assert.rejects(art.loadPet("dog", "brown"), /Download failed/);
   for (const rel of dogFiles("brown")) web[url(rel)] = GIF;
   assert.deepEqual(Object.keys((await art.loadPet("dog", "brown")).sprites).sort(), DOG);
+});
+
+test("mirroring a big sprite pauses for the app again and again", async () => {
+  const [w, h] = [300, 200];
+  const pixels = Array.from({ length: w * h }, (_, i) => ((i % w) * 7 + Math.floor(i / w)) % 4);
+  const big = makeGif({ width: w, height: h, palette: PALETTE, frames: [{ pixels }] });
+  const { art, calls, clock, disk } = fake({ files: extensionWith(dogFiles("brown"), big) });
+  clock.tick = true;
+  const meta = await art.loadPet("dog", "brown");
+  assert.equal(meta.sprites.walk.width, 300);
+  assert.ok(calls.pause >= 5, `${calls.pause} pauses`); // 5 sprites of several slices each
+  const left = decode(disk.get(`${CACHE}/dog/brown_walk_8fps.left.gif`)).frames[0].pixels;
+  assert.deepEqual([...left.subarray(0, 4)], pixels.slice(296, 300).reverse());
+});
+
+test("a small sprite is mirrored without pausing when no time has passed", async () => {
+  const { art, calls } = fake({ files: extensionWith(dogFiles("brown")) });
+  await art.loadPet("dog", "brown");
+  assert.equal(calls.pause, 0);
 });

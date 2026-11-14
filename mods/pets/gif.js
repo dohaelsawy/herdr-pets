@@ -1,15 +1,31 @@
 // Reads a GIF's size and writes a mirrored copy. Pure: bytes in, bytes out.
 // Herdr's UI kit cannot flip an image, so left-facing sprites have to exist as files.
+//
+// Herdr stops a script that runs for about half a second without a break, and the
+// stop cannot be caught. A big sprite (totoro's is 27 frames of 600 x 396) takes
+// longer than that to mirror. So the work is written as steps: every function with a
+// * yields after each SLICE pixels, flop() runs the steps straight through, and
+// flopAsync() takes a breath between them.
 
 const u16 = (b, p) => b[p] | (b[p + 1] << 8);
-// Far beyond any sprite (the largest upstream one is 696 x 460). A frame claiming
-// more is not decoded: this code runs on Herdr's own thread.
-const MAX_PIXELS = 4_000_000;
 const tableLength = (packed) => (packed & 0x80 ? 3 * (1 << ((packed & 7) + 1)) : 0);
+// Far beyond any sprite (the largest upstream one is 696 x 460). A frame claiming
+// more is not decoded.
+const MAX_PIXELS = 4_000_000;
+// Pixels of work between two breaths: a few milliseconds in Herdr's script engine.
+export const SLICE = 16384;
 
 export function readSize(bytes) {
   if (bytes.length < 13 || bytes[0] !== 0x47 || bytes[1] !== 0x49 || bytes[2] !== 0x46) throw new Error("not a GIF");
   return { width: u16(bytes, 6), height: u16(bytes, 8) };
+}
+
+// Runs a stepped function to its end without a break.
+function finish(steps) {
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
 }
 
 // GIF data is cut into sub-blocks: a length byte, that many bytes, ... and a 0 to end.
@@ -28,16 +44,20 @@ function readSubBlocks(b, p) {
   return { data, end: p + 1 };
 }
 
-function writeSubBlocks(out, data) {
+function subBlocks(data) {
+  const out = new Uint8Array(data.length + Math.ceil(data.length / 255) + 1);
+  let o = 0;
   for (let i = 0; i < data.length; i += 255) {
     const n = Math.min(255, data.length - i);
-    out.push(n);
-    for (let j = 0; j < n; j++) out.push(data[i + j]);
+    out[o++] = n;
+    out.set(data.subarray(i, i + n), o);
+    o += n;
   }
-  out.push(0);
+  out[o++] = 0;
+  return out.subarray(0, o);
 }
 
-export function lzwDecode(minCode, data, count) {
+function* lzwDecodeSteps(minCode, data, count) {
   const clear = 1 << minCode;
   const eoi = clear + 1;
   const prefix = new Uint16Array(4096);
@@ -53,6 +73,7 @@ export function lzwDecode(minCode, data, count) {
   let datum = 0;
   let bits = 0;
   let op = 0;
+  let breath = SLICE;
   for (let p = 0; p < data.length; p++) {
     datum |= data[p] << bits;
     bits += 8;
@@ -104,25 +125,35 @@ export function lzwDecode(minCode, data, count) {
       old = incoming;
       while (sp > 0 && op < count) out[op++] = stack[--sp];
     }
+    if (op >= breath) {
+      breath = op + SLICE;
+      yield;
+    }
   }
   if (op < count) throw new Error("GIF image data ends early");
   return out;
 }
 
-export function lzwEncode(minCode, pixels) {
+// The writer's table of (code so far, next pixel) -> code, as two flat arrays:
+// much quicker in Herdr's script engine than a Map.
+const SLOTS = 8192; // a power of two, twice the 4096 codes there can be
+function* lzwEncodeSteps(minCode, pixels) {
   const clear = 1 << minCode;
   const eoi = clear + 1;
-  const out = [];
+  // A code is at most 12 bits and there is at most one per pixel, plus the two ends.
+  const out = new Uint8Array(pixels.length * 2 + 16);
+  const keys = new Int32Array(SLOTS).fill(-1);
+  const codes = new Uint16Array(SLOTS);
+  let o = 0;
   let size = minCode + 1;
   let next = eoi + 1;
   let datum = 0;
   let bits = 0;
-  let table = new Map();
   const emit = (code) => {
     datum |= code << bits;
     bits += size;
     while (bits >= 8) {
-      out.push(datum & 255);
+      out[o++] = datum & 255;
       datum >>>= 8;
       bits -= 8;
     }
@@ -133,30 +164,36 @@ export function lzwEncode(minCode, pixels) {
     for (let i = 1; i < pixels.length; i++) {
       const px = pixels[i];
       const key = (cur << 8) | px;
-      const hit = table.get(key);
-      if (hit !== undefined) {
-        cur = hit;
-        continue;
-      }
-      emit(cur);
-      if (next < 4096) {
-        table.set(key, next++);
-        // The reader grows its code size one code later than the writer adds an entry.
-        if (next > 1 << size && size < 12) size++;
+      let slot = (Math.imul(key, 0x9e3779b1) >>> 19) & (SLOTS - 1);
+      while (keys[slot] !== -1 && keys[slot] !== key) slot = (slot + 1) & (SLOTS - 1);
+      if (keys[slot] === key) {
+        cur = codes[slot];
       } else {
-        emit(clear);
-        table = new Map();
-        size = minCode + 1;
-        next = eoi + 1;
+        emit(cur);
+        if (next < 4096) {
+          keys[slot] = key;
+          codes[slot] = next++;
+          // The reader grows its code size one code later than the writer adds an entry.
+          if (next > 1 << size && size < 12) size++;
+        } else {
+          emit(clear);
+          keys.fill(-1);
+          size = minCode + 1;
+          next = eoi + 1;
+        }
+        cur = px;
       }
-      cur = px;
+      if (i % SLICE === 0) yield;
     }
     emit(cur);
   }
   emit(eoi);
-  if (bits > 0) out.push(datum & 255);
-  return Uint8Array.from(out);
+  if (bits > 0) out[o++] = datum & 255;
+  return out.subarray(0, o);
 }
+
+export const lzwDecode = (minCode, data, count) => finish(lzwDecodeSteps(minCode, data, count));
+export const lzwEncode = (minCode, pixels) => finish(lzwEncodeSteps(minCode, pixels));
 
 // Interlaced frames store rows 0,8,16.. then 4,12.. then 2,6,10.. then 1,3,5..
 function deinterlace(px, w, h) {
@@ -173,7 +210,7 @@ function deinterlace(px, w, h) {
 
 // Walks the file: { width, height, headEnd, blocks }, each block either
 // { ext: [start, end] } (copied through as is) or a decoded image.
-function parse(bytes) {
+function* parseSteps(bytes) {
   const { width, height } = readSize(bytes);
   let p = 13 + tableLength(bytes[10]);
   const headEnd = p;
@@ -202,17 +239,18 @@ function parse(bytes) {
     const minCode = bytes[table[1]];
     if (!(minCode >= 2 && minCode <= 8)) throw new Error(`bad GIF code size ${minCode}`);
     const { data, end } = readSubBlocks(bytes, table[1] + 1);
-    let pixels = lzwDecode(minCode, data, w * h);
+    let pixels = yield* lzwDecodeSteps(minCode, data, w * h);
     if (packed & 0x40) pixels = deinterlace(pixels, w, h);
     blocks.push({ left, top, width: w, height: h, packed, table, minCode, pixels });
     p = end;
+    yield;
   }
   return { width, height, headEnd, blocks };
 }
 
 // The frames as palette indexes, for tests and debugging.
 export function decode(bytes) {
-  const g = parse(bytes);
+  const g = finish(parseSteps(bytes));
   return {
     width: g.width,
     height: g.height,
@@ -220,31 +258,45 @@ export function decode(bytes) {
   };
 }
 
-// The same animation, mirrored left to right. Colours, delays, disposal,
+// The same animation, mirrored left to right, as steps. Colours, delays, disposal,
 // transparency and looping are copied through untouched.
-export function flop(bytes) {
-  const g = parse(bytes);
-  const out = [];
-  const copy = (from, to) => { for (let i = from; i < to; i++) out.push(bytes[i]); };
-  const put16 = (v) => out.push(v & 255, (v >> 8) & 255);
-  copy(0, g.headEnd);
+export function* flopSteps(bytes) {
+  const g = yield* parseSteps(bytes);
+  const parts = [bytes.subarray(0, g.headEnd)];
   for (const b of g.blocks) {
     if (b.ext) {
-      copy(b.ext[0], b.ext[1]);
+      parts.push(bytes.subarray(b.ext[0], b.ext[1]));
       continue;
     }
     const { width: w, height: h, pixels } = b;
     for (let y = 0; y < h; y++) pixels.subarray(y * w, y * w + w).reverse();
-    out.push(0x2c);
-    put16(Math.max(0, g.width - b.left - w));
-    put16(b.top);
-    put16(w);
-    put16(h);
-    out.push(b.packed & ~0x40); // rows are written in order now
-    copy(b.table[0], b.table[1]);
-    out.push(b.minCode);
-    writeSubBlocks(out, lzwEncode(b.minCode, pixels));
+    const left = Math.max(0, g.width - b.left - w);
+    parts.push(Uint8Array.from([
+      0x2c, left & 255, left >> 8, b.top & 255, b.top >> 8, w & 255, w >> 8, h & 255, h >> 8,
+      b.packed & ~0x40, // rows are written in order now
+    ]));
+    parts.push(bytes.subarray(b.table[0], b.table[1]));
+    parts.push(Uint8Array.from([b.minCode]));
+    parts.push(subBlocks(yield* lzwEncodeSteps(b.minCode, pixels)));
+    yield;
   }
-  out.push(0x3b);
-  return Uint8Array.from(out);
+  parts.push(Uint8Array.from([0x3b]));
+  const out = new Uint8Array(parts.reduce((n, part) => n + part.length, 0));
+  let at = 0;
+  for (const part of parts) { out.set(part, at); at += part.length; }
+  return out;
+}
+
+// For small files and for tests: straight through, no breaks.
+export const flop = (bytes) => finish(flopSteps(bytes));
+
+// For use inside Herdr: `breathe` is awaited between slices. It must hand control
+// back to the app (any real asynchronous call does), or a big sprite is cut off.
+export async function flopAsync(bytes, breathe) {
+  const steps = flopSteps(bytes);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+    await breathe();
+  }
 }

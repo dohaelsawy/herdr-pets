@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { readSize, decode, flop, lzwEncode, lzwDecode } from "../mods/pets/gif.js";
+import { readSize, decode, flop, flopAsync, flopSteps, SLICE, lzwEncode, lzwDecode } from "../mods/pets/gif.js";
 import { makeGif, controlBlocks, gifWithImageData } from "./helpers.mjs";
 
 const PALETTE = [[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]];
@@ -121,6 +121,35 @@ test("a file cut inside an image header says so", () => {
   const gif = makeGif({ width: 2, height: 1, palette: PALETTE, frames: [{ pixels: [1, 2] }], loop: false });
   const at = gif.indexOf(0x2c, 13 + 12); // the image descriptor, after the header and palette
   assert.throws(() => flop(gif.subarray(0, at + 4)), /GIF ended inside an image header/);
+});
+
+// One frame bigger than several slices, with a pattern that mirrors to something else.
+const bigGif = () => {
+  const [w, h] = [300, 200];
+  const pixels = Array.from({ length: w * h }, (_, i) => ((i % w) * 7 + Math.floor(i / w)) % 4);
+  return makeGif({ width: w, height: h, palette: PALETTE, frames: [{ pixels }, { pixels: pixels.map((p) => (p + 1) % 4), delay: 20 }] });
+};
+
+test("the mirror works in slices: it stops for breath many times in a big frame", () => {
+  const gif = bigGif();
+  let breaths = 0;
+  for (const _ of flopSteps(gif)) breaths++;
+  // 2 frames of 60,000 pixels, each read once and written once, a breath every SLICE.
+  assert.ok(breaths >= Math.floor((2 * 2 * 60000) / SLICE), `${breaths} breaths`);
+  assert.ok(SLICE <= 20000, "a slice must stay small: Herdr stops a script after about half a second");
+});
+
+test("flopAsync gives the same bytes as flop and waits between slices", async () => {
+  const gif = bigGif();
+  let waits = 0;
+  const out = await flopAsync(gif, async () => { waits++; });
+  assert.deepEqual(out, flop(gif));
+  assert.ok(waits >= 10, `${waits} waits`);
+});
+
+test("flopAsync rejects malformed data the same way", async () => {
+  const gif = makeGif({ width: 2, height: 1, palette: PALETTE, frames: [{ pixels: [1, 2] }] });
+  await assert.rejects(flopAsync(gif.subarray(0, gif.length - 3), async () => {}));
 });
 
 // Runs only on a machine with vscode-pets installed; the art is read, never copied here.
