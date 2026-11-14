@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { readSize, decode, flop, flopAsync, flopSteps, SLICE, lzwEncode, lzwDecode } from "../mods/pets/gif.js";
+import { readSize, decode, flop, flopAsync, flopSteps, SLICE, lzwEncode, lzwDecode } from "../mods/vscode-pets/gif.js";
 import { makeGif, controlBlocks, gifWithImageData } from "./helpers.mjs";
 
 const PALETTE = [[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]];

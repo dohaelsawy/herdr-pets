@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { newestExtension, spriteName, leftName, rawUrl, themeFiles, fit, pngSize, EXTENSION_ONLY } from "../mods/pets/sources.js";
-import { TYPES } from "../mods/pets/pets.js";
+import { newestExtension, spriteName, leftName, rawUrl, themeFiles, fit, pngSize, EXTENSION_ONLY } from "../mods/vscode-pets/sources.js";
+import { TYPES } from "../mods/vscode-pets/pets.js";
 
 test("newestExtension compares versions as numbers", () => {
   const names = ["ms-python.python-2024.1.0", "tonybaloney.vscode-pets-1.9.0", "tonybaloney.vscode-pets-1.37.0", "tonybaloney.vscode-pets-1.36.2"];

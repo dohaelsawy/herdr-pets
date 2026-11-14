@@ -5,12 +5,12 @@ import { div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { shared, setShared, theme, props, openOverlay, closeOverlay, notify } from "herdr";
 import { PETS, TYPES } from "./pets.js";
-import { KEY, MAX_PETS, SIZE_NAMES, THEMES, load, addPet, removePet, renamePet, removeAll, withSize, withTheme, randomName, newId } from "./store.js";
+import { KEY, MAX_PETS, SIZE_NAMES, THEMES, read, addPet, removePet, renamePet, removeAll, withSize, withTheme, randomName, newId } from "./store.js";
 import { EXTENSION_ONLY } from "./sources.js";
 import { extensionMedia, loadPet } from "./art.js";
 
 // The mod's folder name. If an install renames the folder, change this to match.
-export const MOD = "pets";
+export const MOD = "vscode-pets";
 
 export const openPicker = () => openOverlay({ mod: MOD, kind: "dialog", width: 420, height: 540, props: { role: "picker" } });
 export const openRename = (pet) => openOverlay({ mod: MOD, kind: "dialog", width: 340, height: 170, props: { role: "rename", pet } });
@@ -19,7 +19,7 @@ export const openMenu = (what) =>
   openOverlay({ mod: MOD, kind: "popup", at: "pointer", width: 200, height: what.menu === "pet" ? 90 : 430, props: { role: "menu", ...what } });
 
 const close = () => closeOverlay(props().overlay);
-const save = (change) => setShared(KEY, change(load(shared(KEY))));
+const save = (change) => setShared(KEY, change(read(shared)));
 const cap = (s) => s.replace(/^./, (c) => c.toUpperCase());
 const pretty = (s) => cap(s.replaceAll("_", " ").replaceAll("-", " "));
 
@@ -61,7 +61,7 @@ const picker = {
   add(v, cx) {
     // A fetch that has said nothing for two minutes is dead: let Add start another.
     if (v.busy && Date.now() - v.busy < 120000) return;
-    if (!v.type || load(shared(KEY)).pets.length >= MAX_PETS) return;
+    if (!v.type || read(shared).pets.length >= MAX_PETS) return;
     const pet = {
       id: newId(Date.now(), Math.random),
       type: v.type,
@@ -89,7 +89,7 @@ const picker = {
 
   render(v) {
     const t = theme();
-    const full = load(shared(KEY)).pets.length >= MAX_PETS;
+    const full = read(shared).pets.length >= MAX_PETS;
     const f = v.filter.trim().toLowerCase();
     const shown = TYPES.filter((type) => !f || type.includes(f) || pretty(type).toLowerCase().includes(f)); // "rubber duck" too
     const locked = (type) => v.extension === false && EXTENSION_ONLY.includes(type);
@@ -131,7 +131,7 @@ const picker = {
 
 const rename = {
   init(v, cx) {
-    const pet = load(shared(KEY)).pets.find((p) => p.id === props().pet);
+    const pet = read(shared).pets.find((p) => p.id === props().pet);
     const name = pet?.name ?? "";
     v.input = InputState.new({ value: name });
     if (name) v.input.set_selected_range({ start: 0, end: name.length });
@@ -177,7 +177,7 @@ function menuRows(p, state) {
     ...THEMES.map((name) => ({ text: cap(name), on: state.theme === name, run: () => save((s) => withTheme(s, name)) })),
     { label: "Size" },
     ...SIZE_NAMES.map((name) => ({ text: cap(name), on: state.size === name, run: () => save((s) => withSize(s, name)) })),
-    // A size set in pixels by command ("pets.size-45") shows as its own ticked row.
+    // A size set in pixels by command ("vscode-pets.size-45") shows as its own ticked row.
     ...(typeof state.size === "number" ? [{ text: `${state.size} px`, on: true, run: () => {} }] : []),
     { label: "" },
     { text: "Remove all", run: () => save(removeAll) },
@@ -189,7 +189,7 @@ const menu = {
 
   render() {
     const t = theme();
-    const rows = menuRows(props() ?? {}, load(shared(KEY)));
+    const rows = menuRows(props() ?? {}, read(shared));
     return v_flex().id("pets-menu").w_full().p(4).bg(t.popover).text_color(t.foreground).text_size(12.5)
       .children(rows.map((row, i) => {
         if (row.label !== undefined) {

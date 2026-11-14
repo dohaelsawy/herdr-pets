@@ -1,10 +1,10 @@
-herdr-pets is a port of VS Code Pets (https://github.com/tonybaloney/vscode-pets)
+herdr-vscode-pets is a port of VS Code Pets (https://github.com/tonybaloney/vscode-pets)
 to the Herdr app.
 
 Code
 ----
-mods/pets/pets.js (each pet's behaviour table, colours and names) is generated
-from the VS Code Pets source, and mods/pets/engine.js follows its state machine.
+mods/vscode-pets/pets.js (each pet's behaviour table, colours and names) is generated
+from the VS Code Pets source, and mods/vscode-pets/engine.js follows its state machine.
 VS Code Pets is distributed under the MIT License:
 
     MIT License

@@ -5,7 +5,7 @@ import { View, div, image } from "gpui-kit";
 import { shared, setShared, theme, settings, props, notify, nextCommand } from "herdr";
 import { PETS } from "./pets.js";
 import { reconcile, hover, drawing } from "./roster.js";
-import { KEY, load, floorFor, applyCommand, boxOf, namedSize } from "./store.js";
+import { KEY, read, floorFor, applyCommand, boxOf, namedSize } from "./store.js";
 import { loadPet, loadTheme } from "./art.js";
 import { DIALOGS, openPicker, openMenu } from "./dialogs.js";
 
@@ -36,13 +36,13 @@ export default class Pets extends View {
     this.art = {}; // "type/colour" -> sprites | { pending: <since> } | { error, at }
     this.scenes = {}; // "theme/kind/size" -> pictures | { pending } | { error, at }
     cx.timer.every(CHECK_MS, (cx) => this.check(cx));
-    // keys.json can bind "pets.spawn", "pets.remove-all", "pets.size-<name>" and
-    // "pets.theme-<name>".
+    // keys.json can bind "vscode-pets.spawn", "vscode-pets.remove-all", "vscode-pets.size-<name>" and
+    // "vscode-pets.theme-<name>".
     cx.spawn(async (cx) => {
       for (;;) {
         const c = await nextCommand();
         try {
-          const next = applyCommand(load(shared(KEY)), c);
+          const next = applyCommand(read(shared), c);
           if (next) setShared(KEY, next);
           else if (c === "spawn") openPicker();
         } catch (e) {
@@ -91,7 +91,7 @@ export default class Pets extends View {
   }
 
   check(cx) {
-    const state = load(shared(KEY));
+    const state = read(shared);
     let scene = null;
     if (state.theme !== "none") {
       const dark = settings()?.dark !== false;
@@ -111,7 +111,7 @@ export default class Pets extends View {
     if (this.dialog) return this.dialog.render(this, cx);
     const t = theme();
     const now = Date.now();
-    const state = load(shared(KEY));
+    const state = read(shared);
     const box = boxOf(state.size);
     const scene = state.theme === "none" ? null : loaded(this.scenes[this.sceneKey(state)]);
 

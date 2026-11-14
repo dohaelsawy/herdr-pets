@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PETS, TYPES, UPSTREAM_TAG } from "../mods/pets/pets.js";
+import { PETS, TYPES, UPSTREAM_TAG } from "../mods/vscode-pets/pets.js";
 
 test("there is a table for each of upstream's 27 pets", () => {
   assert.equal(TYPES.length, 27);

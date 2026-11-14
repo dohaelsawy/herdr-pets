@@ -333,3 +333,15 @@ Made on 2026-11-14 during the owner's trial in the running app:
 - **Herdr does not hot-reload a symlinked mod folder.** Development copies the mod
   in with `scripts/sync-to-herdr.sh`.
 
+Made on 2026-11-14 after publishing:
+
+- **Renamed to `herdr-vscode-pets`.** Herdr's gallery already listed an unrelated
+  mod called `herdr-pets`. The repo is `herdr-vscode-pets`, the mod folder
+  `mods/vscode-pets`, the gallery title "VS Code Pets", the commands
+  `vscode-pets.*`, the cache `data/vscode-pets/` and the saved-state key
+  `vscode-pets`. The old key `pets` is still read while nothing is saved under the
+  new one, so the rename loses nobody's pets. Earlier sections of this document
+  and its file name keep the first name.
+- **A size may be given in pixels** (`vscode-pets.size-45`, 20 to 160) as well as
+  by one of upstream's four names; a theme then uses the nearest named size.
+

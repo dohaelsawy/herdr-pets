@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createArt, DATA_REL } from "../mods/pets/artcore.js";
-import { rawUrl } from "../mods/pets/sources.js";
-import { decode } from "../mods/pets/gif.js";
+import { createArt, DATA_REL } from "../mods/vscode-pets/artcore.js";
+import { rawUrl } from "../mods/vscode-pets/sources.js";
+import { decode } from "../mods/vscode-pets/gif.js";
 import { makeGif } from "./helpers.mjs";
 
 const HOME = "/home/me";
@@ -135,8 +135,8 @@ test("loadPet copies from the extension, mirrors each sprite and records its siz
   const meta = await art.loadPet("dog", "brown");
   assert.deepEqual(Object.keys(meta.sprites).sort(), DOG);
   assert.deepEqual(meta.sprites.walk, {
-    right: "data/pets/dog/brown_walk_8fps.gif",
-    left: "data/pets/dog/brown_walk_8fps.left.gif",
+    right: "data/vscode-pets/dog/brown_walk_8fps.gif",
+    left: "data/vscode-pets/dog/brown_walk_8fps.left.gif",
     width: 3,
     height: 1,
   });
@@ -273,7 +273,7 @@ test("a colour with a space is stored with an underscore", async () => {
   const labels = ["idle", "stand", "swipe", "walk", "walk_fast"];
   const { art, disk } = fake({ files: extensionWith(labels.map((l) => `horse/socks_black_${l}_8fps.gif`)) });
   const meta = await art.loadPet("horse", "socks black");
-  assert.equal(meta.sprites.walk.right, "data/pets/horse/socks_black_walk_8fps.gif");
+  assert.equal(meta.sprites.walk.right, "data/vscode-pets/horse/socks_black_walk_8fps.gif");
   assert.ok(disk.has(`${CACHE}/horse/socks_black.json`));
 });
 
@@ -281,8 +281,8 @@ test("loadTheme returns both pictures with their sizes", async () => {
   const rels = ["backgrounds/forest/background-dark-nano.png", "backgrounds/forest/foreground-dark-nano.png"];
   const { art } = fake({ files: extensionWith(rels, PNG) });
   assert.deepEqual(await art.loadTheme("forest", true, "nano"), {
-    background: { path: "data/pets/backgrounds/forest/background-dark-nano.png", width: 351, height: 300 },
-    foreground: { path: "data/pets/backgrounds/forest/foreground-dark-nano.png", width: 351, height: 300 },
+    background: { path: "data/vscode-pets/backgrounds/forest/background-dark-nano.png", width: 351, height: 300 },
+    foreground: { path: "data/vscode-pets/backgrounds/forest/foreground-dark-nano.png", width: 351, height: 300 },
   });
 });
 

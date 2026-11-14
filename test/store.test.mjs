@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MAX_PETS, load, addPet, removePet, renamePet, removeAll, withSize, withTheme, floorFor, randomName, newId, applyCommand, boxOf, namedSize } from "../mods/pets/store.js";
-import { PETS } from "../mods/pets/pets.js";
+import { MAX_PETS, load, addPet, removePet, renamePet, removeAll, withSize, withTheme, floorFor, randomName, newId, applyCommand, boxOf, namedSize, read, KEY, OLD_KEY } from "../mods/vscode-pets/store.js";
+import { PETS } from "../mods/vscode-pets/pets.js";
 
 const rex = { id: "a", type: "dog", color: "brown", name: "Rex" };
 
@@ -130,4 +130,13 @@ test("namedSize picks the nearest of the four sizes, for a theme's pictures and 
   assert.deepEqual([20, 34, 36, 45, 48, 80, 83, 160].map(namedSize), ["nano", "nano", "small", "small", "medium", "medium", "large", "large"]);
   assert.equal(floorFor("forest", 45), 30); // the small picture's ground
   assert.equal(floorFor("none", 45), 0);
+});
+
+test("read takes the saved value from the mod's key, or from the key it had before its rename", () => {
+  assert.deepEqual([KEY, OLD_KEY], ["vscode-pets", "pets"]);
+  const old = { pets: [rex], size: 45, theme: "forest" };
+  assert.deepEqual(read((key) => (key === "pets" ? old : undefined)), old);
+  const now = { pets: [], size: "small", theme: "none" };
+  assert.deepEqual(read((key) => (key === "vscode-pets" ? now : old)), now); // the new key wins once it exists
+  assert.deepEqual(read(() => undefined), { pets: [], size: "medium", theme: "none" });
 });

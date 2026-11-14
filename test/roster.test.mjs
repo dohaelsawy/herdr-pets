@@ -1,14 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { referenceSize, reconcile, hover, drawing } from "../mods/pets/roster.js";
-import { enter } from "../mods/pets/engine.js";
+import { referenceSize, reconcile, hover, drawing } from "../mods/vscode-pets/roster.js";
+import { enter } from "../mods/vscode-pets/engine.js";
 
 const ENV = { width: 400, height: 300, floor: 0 };
 const half = () => 0.5;
 const rex = { id: "a", type: "dog", color: "brown", name: "Rex" };
 const tom = { id: "b", type: "cat", color: "black", name: "Tom" };
 // Sprites as art.js gives them; the dog's idle is 115 x 90 and its lie 140 x 75.
-const sprite = (label, width, height) => ({ right: `data/pets/dog/brown_${label}_8fps.gif`, left: `data/pets/dog/brown_${label}_8fps.left.gif`, width, height });
+const sprite = (label, width, height) => ({ right: `data/vscode-pets/dog/brown_${label}_8fps.gif`, left: `data/vscode-pets/dog/brown_${label}_8fps.left.gif`, width, height });
 const DOG = { idle: sprite("idle", 115, 90), lie: sprite("lie", 140, 75), walk: sprite("walk", 120, 85), walk_fast: sprite("walk_fast", 120, 85), swipe: sprite("swipe", 115, 90) };
 const loaded = () => DOG;
 const none = () => null;
@@ -77,7 +77,7 @@ test("drawing gives the leg's end, the time left on the axis that moves, and the
   assert.deepEqual([d.x, d.y], [350, 0]);
   assert.equal(d.moveX, 7000); // a 10 s walk, 3 s in
   assert.equal(d.moveY, 0); // feet stay on the ground: no glide on this axis
-  assert.deepEqual(d.sprite, { path: "data/pets/dog/brown_walk_8fps.gif", w: 30, h: 21 });
+  assert.deepEqual(d.sprite, { path: "data/vscode-pets/dog/brown_walk_8fps.gif", w: 30, h: 21 });
   assert.equal(d.bubble, null);
 });
 
@@ -92,7 +92,7 @@ test("drawing uses the mirrored file when the pet faces left", () => {
   const live = {};
   reconcile(live, [rex], loaded, 30, ENV, 0, half);
   enter(live.a, "walk-left", { x: 300, y: 0 }, ENV, 0, half);
-  assert.equal(drawing(live.a, DOG, 30, 0).sprite.path, "data/pets/dog/brown_walk_8fps.left.gif");
+  assert.equal(drawing(live.a, DOG, 30, 0).sprite.path, "data/vscode-pets/dog/brown_walk_8fps.left.gif");
 });
 
 test("drawing falls back to idle for an animation the pet lacks, and to the emoji without sprites", () => {
@@ -100,7 +100,7 @@ test("drawing falls back to idle for an animation the pet lacks, and to the emoj
   reconcile(live, [rex], loaded, 30, ENV, 0, half);
   enter(live.a, "lie", { x: 10, y: 0 }, ENV, 0, half);
   const { lie, ...withoutLie } = DOG;
-  assert.equal(drawing(live.a, withoutLie, 30, 0).sprite.path, "data/pets/dog/brown_idle_8fps.gif");
+  assert.equal(drawing(live.a, withoutLie, 30, 0).sprite.path, "data/vscode-pets/dog/brown_idle_8fps.gif");
   const d = drawing(live.a, null, 30, 0);
   assert.equal(d.sprite, null);
   assert.deepEqual([d.w, d.h], [30, 23]);

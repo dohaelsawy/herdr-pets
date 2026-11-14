@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PETS } from "../mods/pets/pets.js";
-import { STATES, SIZES, spritesFor, spawn, enter, step, swipe, refit, positionAt } from "../mods/pets/engine.js";
+import { PETS } from "../mods/vscode-pets/pets.js";
+import { STATES, SIZES, spritesFor, spawn, enter, step, swipe, refit, positionAt } from "../mods/vscode-pets/engine.js";
 import { seq } from "./helpers.mjs";
 
 const ENV = { width: 400, height: 300, floor: 0 };

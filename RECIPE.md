@@ -1,17 +1,17 @@
-# Pets
+# VS Code Pets
 
 A small sidebar panel where the VS Code Pets animals live. The person adds pets with a +
 button, each with an animal, a colour and a name. Pets idle, walk, run, lie down and
 (cat, totoro, squirrel) climb the left wall, each following its own sequence from VS
 Code Pets. They are decoration and know nothing about agents.
 
-![Pets](preview.png)
+![VS Code Pets](preview.png)
 
 ## What you see
 
 - One block in the sidebar column, just above its footer, 110 px high and as wide as
-  the sidebar: `{ "id": "pets", "type": "block", "content": { "mod": "pets" }, "size": { "px": 110 } }`.
-  `mod.json` is `{ "place": "none", "title": "Pets" }`: the mod does not dock itself,
+  the sidebar: `{ "id": "vscode-pets", "type": "block", "content": { "mod": "vscode-pets" }, "size": { "px": 110 } }`.
+  `mod.json` is `{ "place": "none", "title": "VS Code Pets" }`: the mod does not dock itself,
   because a self-docked mod becomes a full-height column. Background `theme().chrome`.
 - Pets stand on the bottom edge, or on the theme's ground line. Each is its animated
   GIF, drawn inside a square box and never enlarged: nano 30 px, small 40, medium 55,
@@ -44,8 +44,8 @@ Code Pets. They are decoration and know nothing about agents.
 - Right-click a pet: popup with "<name> the <animal>", Rename… (a dialog), Remove.
 - Right-click the ground: popup with Add pet…, Theme (7, the current one ticked), Size
   (4, ticked), Remove all.
-- Commands `pets.spawn` (opens the dialog), `pets.remove-all`, `pets.size-<name>` and
-  `pets.theme-<name>`. No keys are shipped. `pets.size-<n>` with a whole number from 20
+- Commands `vscode-pets.spawn` (opens the dialog), `vscode-pets.remove-all`, `vscode-pets.size-<name>` and
+  `vscode-pets.theme-<name>`. No keys are shipped. `vscode-pets.size-<n>` with a whole number from 20
   to 160 sets the box in pixels; the Size menu then shows a ticked "<n> px" row, and a
   theme uses the pictures and ground of the nearest named size.
 - Pets, size and theme are saved; positions are not. After a restart pets start at a
@@ -53,7 +53,7 @@ Code Pets. They are decoration and know nothing about agents.
 
 ## Built from
 
-- `mods/pets/`: `main.js` (panel view; with `props().role` it is one of the dialogs),
+- `mods/vscode-pets/`: `main.js` (panel view; with `props().role` it is one of the dialogs),
   `dialogs.js` (picker, rename, menu), `roster.js` (keeps the pets on screen in step
   with the saved list and says what to draw; pure), `engine.js` (states to legs; pure),
   `pets.js` (generated tables for 27 pets from VS Code Pets 1.37.0), `store.js` (saved
@@ -67,7 +67,7 @@ Code Pets. They are decoration and know nothing about agents.
   up or down; the other axis gets 150 ms.
 - `cx.timer.every(200)` checks for finished legs and calls `cx.notify()` only when a
   pet starts a new one.
-- `herdr`: `shared("pets")` / `setShared("pets", { pets: [{ id, type, color, name }], size, theme })`,
+- `herdr`: `shared("vscode-pets")` / `setShared("vscode-pets", { pets: [{ id, type, color, name }], size, theme })`,
   `openOverlay` (dialog and popup of this same mod), `closeOverlay`, `notify`,
   `nextCommand`, `theme`, `settings` (`zoom`, `dark`), `props`, `exec`, `home`,
   `appHome`; `fs/promises` for binary read and write.
@@ -78,7 +78,7 @@ Code Pets. They are decoration and know nothing about agents.
   `curl -sL --proto =https --retry 2 --connect-timeout 10 --max-time 20 --max-filesize 20000000 -o <side file> -w %{http_code}`
   against `https://raw.githubusercontent.com/tonybaloney/vscode-pets/1.37.0/media/`:
   200 is kept, 404 means the pet has no such animation, anything else is an error.
-  Files go to `~/.config/herdr-app/data/pets/<type>/`, each with a mirrored `.left.gif`
+  Files go to `~/.config/herdr-app/data/vscode-pets/<type>/`, each with a mirrored `.left.gif`
   written by `gif.js`, and a `<colour>.json` listing them. Theme pictures:
   `backgrounds/<theme>/{background,foreground}-{dark,light}-<size>.png`.
 - It reads those extension folders, runs `curl` (for any file the installed extension
@@ -119,20 +119,20 @@ Code Pets. They are decoration and know nothing about agents.
 - Treat downloaded bytes as untrusted: a GIF with a bad code or a picture claiming
   width 0 must be rejected, because a loop on Herdr's thread freezes the window.
 - Pets stand on a theme's ground only once its picture has loaded.
-- The overlays open `mod: "pets"`. If the folder is renamed on install, change `MOD`
+- The overlays open `mod: "vscode-pets"`. If the folder is renamed on install, change `MOD`
   in `dialogs.js` and `DATA_REL` in `artcore.js`.
 - No ball, no pets chasing each other, no falling snow/leaves/stars, no saved positions.
 
 ## Done when
 
-- `herdr-app check mods/pets` passes and `npm test` passes.
+- `herdr-app check mods/vscode-pets` passes and `npm test` passes.
 - `+`, pick dog, Add: a dog appears on the ground and walks to the right edge and back,
   its feet on the ground the whole way, also right after lying down.
 - Pointing at it stops it for 1.5 s with a 👋 above it, then it carries on.
 - A cat climbs the left wall, hangs and jumps down in a panel 160 px or taller.
 - Adding Totoro shows "Fetching…" for some seconds, the window stays responsive, and
   Totoro appears.
-- `herdr-app do pets.size-small` makes every pet smaller at once.
+- `herdr-app do vscode-pets.size-small` makes every pet smaller at once.
 - Right-click the ground, Theme, Forest: the forest appears and pets stand on its ground.
 - Right-click a pet, Rename…, type a name, Enter: the menu header shows the new name.
 - Quit and reopen Herdr: the same pets, size and theme are there.

@@ -1,5 +1,5 @@
 // Builds small GIFs in code, so the tests ship no art.
-import { lzwEncode } from "../mods/pets/gif.js";
+import { lzwEncode } from "../mods/vscode-pets/gif.js";
 
 const le16 = (v) => [v & 255, (v >> 8) & 255];
 

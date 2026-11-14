@@ -1,4 +1,4 @@
-// Finds the sprites and keeps a copy under ~/.config/herdr-app/data/pets/.
+// Finds the sprites and keeps a copy under ~/.config/herdr-app/data/vscode-pets/.
 // The logic lives here with its file and program access passed in, so it runs under
 // tests; art.js hands it Herdr's real ones. Nothing it fetches is ever part of this repo.
 //
@@ -11,7 +11,7 @@ import { spritesFor } from "./engine.js";
 import { readSize, flopAsync } from "./gif.js";
 import { EDITOR_DIRS, EXTENSION_ONLY, newestExtension, spriteName, leftName, rawUrl, themeFiles, pngSize } from "./sources.js";
 
-export const DATA_REL = "data/pets"; // image() paths are relative to ~/.config/herdr-app
+export const DATA_REL = "data/vscode-pets"; // image() paths are relative to ~/.config/herdr-app
 const RECIPE = 1; // bump when what is cached changes shape, so old caches are rebuilt
 const CURL_SECONDS = 20; // per attempt
 const EXEC_MS = 90000; // curl's three attempts and their pauses fit inside this

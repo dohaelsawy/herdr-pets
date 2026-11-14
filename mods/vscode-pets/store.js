@@ -3,7 +3,10 @@
 import { PETS } from "./pets.js";
 import { SIZES } from "./engine.js";
 
-export const KEY = "pets";
+export const KEY = "vscode-pets";
+// The key this mod saved under before it was renamed from "pets". It is read while
+// nothing has been saved under KEY yet, so a rename does not lose anyone's pets.
+export const OLD_KEY = "pets";
 export const MAX_PETS = 20;
 export const SIZE_NAMES = ["nano", "small", "medium", "large"];
 export const THEMES = ["none", "forest", "castle", "beach", "winter", "autumn", "library"];
@@ -12,7 +15,7 @@ export const THEMES = ["none", "forest", "castle", "beach", "winter", "autumn", 
 export const DEFAULT_SIZE = "medium";
 
 // A size is one of upstream's four names, or a whole number of pixels for the pet's
-// box, for when none of the four suits a panel ("pets.size-45").
+// box, for when none of the four suits a panel ("vscode-pets.size-45").
 export const MIN_BOX = 20;
 export const MAX_BOX = 160;
 const validSize = (size) => SIZE_NAMES.includes(size) || (Number.isInteger(size) && size >= MIN_BOX && size <= MAX_BOX);
@@ -95,7 +98,7 @@ export function withSize(state, size) {
 export const withTheme = (state, theme) => (THEMES.includes(theme) ? { ...state, theme } : state);
 
 // What a key command does to the saved value: "size-<name>", "theme-<name>" or
-// "remove-all" ("pets.size-large" in keys.json). Null for any other command.
+// "remove-all" ("vscode-pets.size-large" in keys.json). Null for any other command.
 export function applyCommand(state, command) {
   const c = String(command ?? "");
   if (c === "remove-all") return removeAll(state);
@@ -106,3 +109,6 @@ export function applyCommand(state, command) {
   }
   return null;
 }
+
+// The saved value, given Herdr's `shared` function.
+export const read = (shared) => load(shared(KEY) ?? shared(OLD_KEY));

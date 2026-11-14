@@ -3,5 +3,5 @@
 # a file inside its own mods folder changes; it does not follow a symlink out of it.
 set -eu
 cd "$(dirname "$0")/.."
-rsync -a --delete --exclude gpui-kit.d.ts --exclude jsconfig.json mods/pets/ "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/pets/"
-echo "synced mods/pets to ${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/pets"
+rsync -a --delete --exclude gpui-kit.d.ts --exclude jsconfig.json mods/vscode-pets/ "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/vscode-pets/"
+echo "synced mods/vscode-pets to ${HERDR_APP_HOME:-$HOME/.config/herdr-app}/mods/vscode-pets"

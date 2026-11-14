@@ -1,4 +1,4 @@
-// Regenerates mods/pets/pets.js from a checkout of vscode-pets' source.
+// Regenerates mods/vscode-pets/pets.js from a checkout of vscode-pets' source.
 //   node scripts/gen-pets.mjs <path to vscode-pets/src> <tag>
 // Reads TypeScript as text; it never executes upstream code.
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -104,6 +104,6 @@ export const PETS = ${JSON.stringify(pets, null, 2)};
 
 export const TYPES = Object.keys(PETS);
 `;
-const dest = join(dirname(fileURLToPath(import.meta.url)), "../mods/pets/pets.js");
+const dest = join(dirname(fileURLToPath(import.meta.url)), "../mods/vscode-pets/pets.js");
 writeFileSync(dest, out);
 console.log(`wrote ${Object.keys(pets).length} pets to ${dest}`);
