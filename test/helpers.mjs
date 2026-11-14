@@ -25,11 +25,13 @@ function interlace(pixels, w, h) {
   return out;
 }
 
-// palette: [[r,g,b], ...] with 4 entries. frames: { left, top, width, height,
+// palette: [[r,g,b], ...] with 2, 4, 8 ... 256 entries. frames: { left, top, width, height,
 // pixels (palette indexes, row by row), delay (1/100 s), transparent (index), interlaced }.
 export function makeGif({ width, height, palette, frames, loop = true }) {
-  if (palette.length !== 4) throw new Error("makeGif wants a 4-colour palette");
-  const out = [0x47, 0x49, 0x46, 0x38, 0x39, 0x61, ...le16(width), ...le16(height), 0x80 | 1, 0, 0];
+  const bits = Math.log2(palette.length);
+  if (!Number.isInteger(bits) || bits < 1 || bits > 8) throw new Error("makeGif wants 2, 4, 8 ... 256 colours");
+  const minCode = Math.max(2, bits);
+  const out = [0x47, 0x49, 0x46, 0x38, 0x39, 0x61, ...le16(width), ...le16(height), 0x80 | (bits - 1), 0, 0];
   for (const [r, g, b] of palette) out.push(r, g, b);
   if (loop) out.push(0x21, 0xff, 11, ...Buffer.from("NETSCAPE2.0"), 3, 1, 0, 0, 0);
   for (const f of frames) {
@@ -39,9 +41,17 @@ export function makeGif({ width, height, palette, frames, loop = true }) {
     const fh = f.height ?? height;
     out.push(0x2c, ...le16(f.left ?? 0), ...le16(f.top ?? 0), ...le16(fw), ...le16(fh), f.interlaced ? 0x40 : 0);
     const px = Uint8Array.from(f.pixels);
-    out.push(2, ...subBlocks(lzwEncode(2, f.interlaced ? interlace(px, fw, fh) : px)));
+    out.push(minCode, ...subBlocks(lzwEncode(minCode, f.interlaced ? interlace(px, fw, fh) : px)));
   }
   out.push(0x3b);
+  return Uint8Array.from(out);
+}
+
+// A one-frame GIF whose image data is the given raw bytes, for malformed-data tests.
+export function gifWithImageData({ width, height, minCode = 2, data }) {
+  const out = [0x47, 0x49, 0x46, 0x38, 0x39, 0x61, ...le16(width), ...le16(height), 0x80 | 1, 0, 0];
+  out.push(0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255);
+  out.push(0x2c, ...le16(0), ...le16(0), ...le16(width), ...le16(height), 0, minCode, ...subBlocks(Uint8Array.from(data)), 0x3b);
   return Uint8Array.from(out);
 }
 

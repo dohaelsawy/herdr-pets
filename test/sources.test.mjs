@@ -51,3 +51,19 @@ test("pngSize reads the header and rejects other files", () => {
 test("the extension-only pets are real pet types", () => {
   for (const type of EXTENSION_ONLY) assert.ok(TYPES.includes(type), type);
 });
+
+test("fit never rounds a thin sprite away to nothing", () => {
+  assert.deepEqual(fit(600, 4, 30), { w: 30, h: 1 });
+  assert.deepEqual(fit(2, 500, 30), { w: 1, h: 30 });
+});
+
+test("pngSize rejects a header that claims no width or no height", () => {
+  const png = new Uint8Array(24);
+  png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  png.set([0, 0, 0, 0], 16);
+  png.set([0, 0, 1, 0x2c], 20);
+  assert.throws(() => pngSize(png), /not a PNG/);
+  png.set([0, 0, 1, 0x5f], 16);
+  png.set([0, 0, 0, 0], 20);
+  assert.throws(() => pngSize(png), /not a PNG/);
+});

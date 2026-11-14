@@ -2,6 +2,9 @@
 // Herdr's UI kit cannot flip an image, so left-facing sprites have to exist as files.
 
 const u16 = (b, p) => b[p] | (b[p + 1] << 8);
+// Far beyond any sprite (the largest upstream one is 696 x 460). A frame claiming
+// more is not decoded: this code runs on Herdr's own thread.
+const MAX_PIXELS = 4_000_000;
 const tableLength = (packed) => (packed & 0x80 ? 3 * (1 << ((packed & 7) + 1)) : 0);
 
 export function readSize(bytes) {
@@ -64,7 +67,13 @@ export function lzwDecode(minCode, data, count) {
         old = -1;
         continue;
       }
-      if (code === eoi) return out;
+      if (code === eoi) {
+        if (op < count) throw new Error("GIF image data ends early");
+        return out;
+      }
+      // A code may name a colour, an entry already made, or the one being made now.
+      // Anything else is corrupt, and following it would never end.
+      if (code > avail || (old === -1 && code >= clear)) throw new Error("bad GIF image data");
       if (old === -1) {
         if (op < count) out[op++] = suffix[code];
         old = code;
@@ -96,6 +105,7 @@ export function lzwDecode(minCode, data, count) {
       while (sp > 0 && op < count) out[op++] = stack[--sp];
     }
   }
+  if (op < count) throw new Error("GIF image data ends early");
   return out;
 }
 
@@ -181,14 +191,16 @@ function parse(bytes) {
       continue;
     }
     if (kind !== 0x2c) throw new Error(`unknown GIF block 0x${kind.toString(16)} at byte ${p}`);
+    if (p + 11 > bytes.length) throw new Error("GIF ended inside an image header");
     const left = u16(bytes, p + 1);
     const top = u16(bytes, p + 3);
     const w = u16(bytes, p + 5);
     const h = u16(bytes, p + 7);
     const packed = bytes[p + 9];
+    if (w * h > MAX_PIXELS) throw new Error("GIF frame is too large");
     const table = [p + 10, p + 10 + tableLength(packed)];
     const minCode = bytes[table[1]];
-    if (minCode < 2 || minCode > 8) throw new Error(`bad GIF code size ${minCode}`);
+    if (!(minCode >= 2 && minCode <= 8)) throw new Error(`bad GIF code size ${minCode}`);
     const { data, end } = readSubBlocks(bytes, table[1] + 1);
     let pixels = lzwDecode(minCode, data, w * h);
     if (packed & 0x40) pixels = deinterlace(pixels, w, h);

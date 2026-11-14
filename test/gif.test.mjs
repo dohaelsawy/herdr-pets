@@ -4,7 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readSize, decode, flop, lzwEncode, lzwDecode } from "../mods/pets/gif.js";
-import { makeGif, controlBlocks } from "./helpers.mjs";
+import { makeGif, controlBlocks, gifWithImageData } from "./helpers.mjs";
 
 const PALETTE = [[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]];
 
@@ -74,6 +74,53 @@ test("flop reads an interlaced frame and writes it in row order", () => {
 test("flop rejects a truncated file", () => {
   const gif = makeGif({ width: 2, height: 1, palette: PALETTE, frames: [{ pixels: [1, 2] }] });
   assert.throws(() => flop(gif.subarray(0, gif.length - 3)));
+});
+
+test("flop handles 256 colours and image data longer than one block", () => {
+  const palette = Array.from({ length: 256 }, (_, i) => [i, 255 - i, (i * 7) % 256]);
+  let seed = 3;
+  const pixels = Array.from({ length: 64 * 48 }, () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return (seed >> 16) & 255;
+  });
+  const gif = makeGif({ width: 64, height: 48, palette, frames: [{ pixels }] });
+  assert.ok(gif.length > 1000); // far past one 255-byte block
+  const out = decode(flop(gif));
+  assert.deepEqual([...out.frames[0].pixels.subarray(0, 64)], pixels.slice(0, 64).reverse());
+  assert.deepEqual(decode(flop(flop(gif))), decode(gif));
+});
+
+// Codes are 3 bits wide here: 4 is "clear", 5 is "end", 6 is the first free code.
+const pack3 = (...codes) => {
+  let datum = 0, bits = 0;
+  const out = [];
+  for (const c of codes) { datum |= c << bits; bits += 3; while (bits >= 8) { out.push(datum & 255); datum >>= 8; bits -= 8; } }
+  if (bits > 0) out.push(datum & 255);
+  return out;
+};
+
+test("image data that names a code not yet defined is rejected, not looped on", () => {
+  // After "clear, 0" the only code that may follow is 0..3 or 6; 7 points at nothing.
+  const bad = gifWithImageData({ width: 4, height: 4, data: pack3(4, 0, 7, 7, 7, 7, 7, 7) });
+  assert.throws(() => flop(bad), /bad GIF image data/);
+  // A first code that is not a plain colour is just as meaningless.
+  assert.throws(() => flop(gifWithImageData({ width: 4, height: 4, data: pack3(4, 6, 0) })), /bad GIF image data/);
+});
+
+test("image data that ends before the frame is full is rejected", () => {
+  const short = gifWithImageData({ width: 4, height: 4, data: pack3(4, 1, 2, 5) }); // 2 of 16 pixels
+  assert.throws(() => flop(short), /GIF image data ends early/);
+});
+
+test("a frame far larger than any sprite is rejected before decoding", () => {
+  const huge = gifWithImageData({ width: 5000, height: 5000, data: pack3(4, 1, 5) });
+  assert.throws(() => flop(huge), /GIF frame is too large/);
+});
+
+test("a file cut inside an image header says so", () => {
+  const gif = makeGif({ width: 2, height: 1, palette: PALETTE, frames: [{ pixels: [1, 2] }], loop: false });
+  const at = gif.indexOf(0x2c, 13 + 12); // the image descriptor, after the header and palette
+  assert.throws(() => flop(gif.subarray(0, at + 4)), /GIF ended inside an image header/);
 });
 
 // Runs only on a machine with vscode-pets installed; the art is read, never copied here.

@@ -39,15 +39,19 @@ export function themeFiles(theme, dark, size) {
   };
 }
 
-// The size a sprite is drawn at: inside a box, never enlarged (upstream's max-width/max-height).
+// The size a sprite is drawn at: inside a box, never enlarged (upstream's max-width/max-height),
+// and never thinner than a pixel.
 export function fit(width, height, box) {
   const k = Math.min(1, box / width, box / height);
-  return { w: Math.round(width * k), h: Math.round(height * k) };
+  return { w: Math.max(1, Math.round(width * k)), h: Math.max(1, Math.round(height * k)) };
 }
 
 export function pngSize(bytes) {
   const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (bytes.length < 24 || sig.some((v, i) => bytes[i] !== v)) throw new Error("not a PNG");
   const be32 = (p) => ((bytes[p] << 24) | (bytes[p + 1] << 16) | (bytes[p + 2] << 8) | bytes[p + 3]) >>> 0;
-  return { width: be32(16), height: be32(20) };
+  const size = { width: be32(16), height: be32(20) };
+  // A picture is tiled across the panel by its width, so a size of 0 must never get out.
+  if (size.width === 0 || size.height === 0) throw new Error("not a PNG");
+  return size;
 }
