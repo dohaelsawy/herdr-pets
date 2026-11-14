@@ -83,3 +83,9 @@ test("addPet ignores a pet whose id is already there", () => {
   const state = addPet(load({ pets: [rex] }), { ...rex, name: "Twin" });
   assert.deepEqual(state.pets, [rex]);
 });
+
+test("load drops a pet whose type is not a string", () => {
+  for (const type of [{ toString: 1 }, ["dog"], 7, null, undefined]) {
+    assert.deepEqual(load({ pets: [{ id: "x", type, color: "brown", name: "X" }, rex] }).pets, [rex], JSON.stringify(type));
+  }
+});
