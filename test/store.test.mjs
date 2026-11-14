@@ -6,8 +6,8 @@ import { PETS } from "../mods/pets/pets.js";
 const rex = { id: "a", type: "dog", color: "brown", name: "Rex" };
 
 test("load gives defaults for nothing saved", () => {
-  assert.deepEqual(load(undefined), { pets: [], size: "nano", theme: "none" });
-  assert.deepEqual(load("garbage"), { pets: [], size: "nano", theme: "none" });
+  assert.deepEqual(load(undefined), { pets: [], size: "medium", theme: "none" });
+  assert.deepEqual(load("garbage"), { pets: [], size: "medium", theme: "none" });
 });
 
 test("load keeps good pets and drops broken ones", () => {
@@ -16,7 +16,7 @@ test("load keeps good pets and drops broken ones", () => {
     size: "huge",
     theme: "forest",
   });
-  assert.deepEqual(state, { pets: [rex], size: "nano", theme: "forest" });
+  assert.deepEqual(state, { pets: [rex], size: "medium", theme: "forest" }); // "huge" is not a size
 });
 
 test("load repairs a colour the pet does not come in and an empty name", () => {

@@ -6,6 +6,9 @@ export const KEY = "pets";
 export const MAX_PETS = 20;
 export const SIZE_NAMES = ["nano", "small", "medium", "large"];
 export const THEMES = ["none", "forest", "castle", "beach", "winter", "autumn", "library"];
+// Upstream starts at nano (30 px), sized for a wide editor panel. In a Herdr sidebar
+// that is too small to see, so this starts one step below upstream's largest.
+export const DEFAULT_SIZE = "medium";
 
 // Where the ground is in each theme's picture, px above the bottom (upstream themes.ts).
 const FLOORS = {
@@ -48,7 +51,7 @@ export function load(raw) {
   }
   return {
     pets,
-    size: SIZE_NAMES.includes(saved.size) ? saved.size : "nano",
+    size: SIZE_NAMES.includes(saved.size) ? saved.size : DEFAULT_SIZE,
     theme: THEMES.includes(saved.theme) ? saved.theme : "none",
   };
 }
