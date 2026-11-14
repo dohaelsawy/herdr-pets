@@ -46,3 +46,14 @@ test("what upstream does in code is carried as data", () => {
   assert.deepEqual(PETS.squirrel.climbRange, [0.3, 0.8]);
   assert.equal(PETS.squirrel.speedFactor, 1.15);
 });
+
+test("names are clean text, even where upstream has an apostrophe in a comment", () => {
+  for (const def of Object.values(PETS)) {
+    for (const name of def.names) {
+      const shown = `${def.label}: ${JSON.stringify(name)}`;
+      assert.equal(name, name.trim(), shown);
+      assert.ok(name.length > 0 && !name.includes("\n") && !name.includes("//") && !name.startsWith(","), shown);
+    }
+  }
+  assert.deepEqual(PETS.squirrel.names.slice(7, 10), ["Conker", "Bucky", "Guinevere"]);
+});

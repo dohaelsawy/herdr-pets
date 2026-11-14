@@ -50,7 +50,22 @@ for (const m of read("panel/pets.ts").matchAll(/return new (\w+)\(\.\.\.standard
   speedOf[m[1]] = SPEED[m[2]];
 }
 
-const strings = (body) => [...body.matchAll(/'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"/g)].map((m) => (m[1] ?? m[2]).replace(/\\(.)/g, "$1"));
+// The string literals in a piece of TypeScript, in order. It skips // comments, so an
+// apostrophe in a comment (// Conker's Bad Fur Day) is not taken for a quote.
+function strings(body) {
+  const out = [];
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === "/" && body[i + 1] === "/") {
+      while (i < body.length && body[i] !== "\n") i++;
+    } else if (c === "'" || c === '"') {
+      let text = "";
+      for (i++; i < body.length && body[i] !== c; i++) text += body[i] === "\\" ? body[++i] : body[i];
+      out.push(text);
+    }
+  }
+  return out;
+}
 
 const pets = {};
 for (const file of readdirSync(join(src, "panel/pets")).filter((f) => f.endsWith(".ts")).sort()) {
