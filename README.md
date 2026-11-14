@@ -53,6 +53,16 @@ medium (55 px).
 The first time you add a big pet (Totoro, the grey raccoon) it takes several seconds:
 its mirrored sprites are made on your machine, in small steps so Herdr stays responsive.
 
+## Screenshots
+
+Pets in the Forest theme, standing on its ground behind the foreground bushes:
+
+![Totoro, a crab, a rubber duck with a boombox and a fox in the Forest theme](screenshots/forest.png)
+
+Adding a pet: type to filter the 27 animals, pick one, then its colour and a name.
+
+<img src="screenshots/add-a-pet.png" alt="The Add a pet dialog, filtered by the letter a" width="332">
+
 ## Where the art comes from
 
 This repository contains code only. The sprites belong to the artists credited in
