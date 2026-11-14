@@ -91,15 +91,15 @@ test("step waits for the leg, then picks the next state with the random source",
 });
 
 test("a fixed random source gives a fixed walk", () => {
-  const run = () => {
-    const pet = dog();
-    const seen = [];
-    let now = 0;
-    const rng = seq(0.1, 0.9, 0.4, 0.7, 0.2);
-    for (let i = 0; i < 5; i++) { now = pet.leg.start + pet.leg.duration; step(pet, ENV, now, rng); seen.push(pet.state); }
-    return seen;
-  };
-  assert.deepEqual(run(), run());
+  const pet = dog();
+  const rng = seq(0.1, 0.9, 0.4, 0.7, 0.2);
+  const seen = [];
+  for (let i = 0; i < 5; i++) {
+    step(pet, ENV, pet.leg.start + pet.leg.duration, rng);
+    seen.push(pet.state);
+  }
+  // sit-idle -> [walk-right, run-right, lie] at 0.1, then each next list at 0.9, 0.4, 0.7, 0.2
+  assert.deepEqual(seen, ["walk-right", "run-left", "lie", "run-right", "walk-left"]);
 });
 
 test("hover stops the pet mid-leg, shows a bubble, then it carries on", () => {
@@ -190,4 +190,42 @@ test("refit pulls back a pet standing beyond the new edge and moves it to a new 
   assert.equal(pet.leg.fromX, 160);
   assert.equal(refit(pet, { width: 200, height: 300, floor: 45 }, 20, half), true);
   assert.deepEqual([pet.leg.fromY, pet.leg.toY], [45, 45]);
+});
+
+
+const cat = (env = ENV) => spawn({ id: "c", type: "cat", color: "brown", name: "Tom" }, 30, env, 0, half);
+
+test("refit leaves a pet on the wall alone while it is inside the panel", () => {
+  const pet = cat();
+  enter(pet, "wall-hang-left", { x: 0, y: 100 }, ENV, 0, half);
+  assert.equal(refit(pet, ENV, 1000, half), false);
+  assert.equal(refit(pet, { width: 200, height: 300, floor: 23 }, 1000, half), false);
+  assert.equal(pet.state, "wall-hang-left");
+});
+
+test("refit brings a pet down when the panel gets too short for where it hangs", () => {
+  const pet = cat();
+  enter(pet, "wall-hang-left", { x: 0, y: 100 }, ENV, 0, half);
+  assert.equal(refit(pet, { width: 400, height: 90, floor: 0 }, 1000, half), true);
+  assert.equal(pet.state, "jump-down-left");
+  assert.deepEqual([pet.leg.fromY, pet.leg.toY, pet.leg.start], [60, 0, 1000]); // feet no higher than 90 - 30
+});
+
+test("refit stops a climb that would end above a shorter panel", () => {
+  const pet = cat();
+  enter(pet, "climb-wall-left", { x: 0, y: 0 }, ENV, 0, half);
+  assert.equal(refit(pet, { width: 400, height: 110, floor: 0 }, 2000, half), true); // at y 20, heading for 100
+  assert.equal(pet.state, "jump-down-left");
+  assert.deepEqual([pet.leg.fromY, pet.leg.toY], [20, 0]);
+});
+
+test("refit re-aims a fall at a floor that moved up, and lands on it", () => {
+  const forest = { width: 400, height: 300, floor: 23 };
+  const pet = cat();
+  enter(pet, "jump-down-left", { x: 0, y: 100 }, ENV, 0, half);
+  assert.equal(refit(pet, forest, 0, half), true);
+  assert.deepEqual([pet.state, pet.leg.fromY, pet.leg.toY], ["jump-down-left", 100, 23]);
+  enter(pet, "land", { x: 0, y: 0 }, ENV, 0, half);
+  assert.equal(refit(pet, forest, 10, half), true);
+  assert.deepEqual([pet.state, pet.leg.fromY, pet.leg.toY], ["land", 23, 23]);
 });

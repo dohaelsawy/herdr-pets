@@ -146,14 +146,28 @@ export function swipe(pet, env, now, rng) {
 }
 
 // The panel, the sprite size or the theme changed. Replans a leg that no longer fits;
-// true when it did.
+// true when it did. A pet on the wall that is now out of bounds comes down.
 export function refit(pet, env, now, rng) {
-  const air = !!STATES[pet.state].air;
+  const def = PETS[pet.type];
   const edge = rightEdge(pet, env);
   const pos = positionAt(pet.leg, now);
-  const fits = pet.leg.toX <= edge && pos.x <= edge && (air || (pet.leg.fromY === env.floor && pet.leg.toY === env.floor));
-  if (fits) return false;
-  const bubble = pet.leg.bubble;
-  enter(pet, pet.state, { x: Math.min(pos.x, edge), y: pos.y }, env, now, rng).bubble = bubble;
+  // "land" counts as off the ground upstream, but the pet is standing on it.
+  const grounded = !STATES[pet.state].air || pet.state === "land";
+  const top = Math.max(env.floor, env.height - pet.h); // as high as its feet can be
+  const inside = (y) => y >= env.floor && y <= top;
+  const fitsX = pet.leg.toX <= edge && pos.x <= edge;
+  const fitsY = grounded
+    ? pet.leg.fromY === env.floor && pet.leg.toY === env.floor
+    : inside(pos.y) && inside(pet.leg.toY);
+  if (fitsX && fitsY) return false;
+  const x = Math.min(pos.x, edge);
+  if (grounded) {
+    const bubble = pet.leg.bubble;
+    enter(pet, pet.state, { x, y: env.floor }, env, now, rng).bubble = bubble;
+  } else if (def.sequence["jump-down-left"]) {
+    enter(pet, "jump-down-left", { x, y: Math.min(Math.max(pos.y, env.floor), top) }, env, now, rng);
+  } else {
+    enter(pet, def.start, { x, y: env.floor }, env, now, rng);
+  }
   return true;
 }
