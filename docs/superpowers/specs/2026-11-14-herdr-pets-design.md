@@ -1,0 +1,259 @@
+# herdr-pets: design
+
+Date: 2026-11-14
+Status: approved in brainstorming, awaiting spec review
+
+## Summary
+
+`herdr-pets` is a public mod for the Herdr app that puts the vscode-pets animals
+in a sidebar panel. Pets are decoration: the user spawns, names and removes them.
+They are not tied to agents.
+
+It is a port, not a GitHub fork. vscode-pets is a VS Code extension host plus a
+DOM webview; Herdr mods are native GPUI JavaScript with no HTML, CSS, web view,
+Node APIs or `setTimeout`. What carries over is the pet behaviour tables, the
+names, and the sprites (fetched at run time, never hosted here).
+
+Upstream: https://github.com/tonybaloney/vscode-pets (MIT). Pinned reference
+release: `1.37.0`.
+
+## Decisions
+
+| # | Decision | Choice |
+|---|---|---|
+| 1 | Purpose | Decorative pets with the vscode-pets characters. No agent link. |
+| 2 | Audience | Public, installable by other Herdr users. |
+| 3 | Art | Repo ships code only. Sprites come from the user's installed vscode-pets extension, else from the upstream GitHub repo. |
+| 4 | Repo | Fresh repo in Herdr's shared-mod format, not a GitHub fork. |
+| 5 | Placement | Sidebar panel by default (`place: "left"`). Sized from its block, so it works elsewhere. |
+| 6 | v1 scope | Core pets (see Scope). |
+| 7 | Controls | Mouse first: a + button, right-click menus, two commands, no shipped keys. |
+| 8 | Behaviour port | Generated pet tables plus one engine that plans legs; native transitions move sprites. |
+| 9 | Left-facing sprites | A GIF flipper inside the mod. No image tools required. |
+
+## Scope
+
+In v1:
+
+- Spawn and remove pets; choose type, colour and name.
+- Sizes nano, small, medium, large.
+- Each pet's own state sequence: idle, walk, run, lie, stand, and wall climbing
+  for the pets that have it (cat, totoro, squirrel).
+- Hover reaction: swipe with a 👋 bubble.
+- Themes none, forest, castle, beach, winter, autumn, library, as still images.
+- Pet list, size and theme persist across restarts.
+
+Out of v1:
+
+- Ball throwing and the `chase` / `idle-with-ball` states. Planned as the second
+  release, after a prototype shows the bounce can be done with native
+  transitions.
+- Pets befriending and chasing each other (`chase-friend`).
+- Snow, leaves and stars effects; roll call; export and import of the pet list.
+- Saved pet positions. Pets start at a random spot on launch.
+- A floating-window mode.
+
+## Constraints from Herdr
+
+- No DOM. UI is gpui-kit builders (`div()`, `image()`, `.absolute()`, `.left()`).
+- `image()` plays animated GIFs (proven by the local `pokemon-agents` mod).
+- There is no mirror or flip transform, so left-facing sprites must exist as files.
+- Animate natively. Motion properties are `opacity`, `width`, `height`, `left`,
+  `top`. A script-driven redraw repaints the whole window, so no frame timers.
+- No `setTimeout`; use `cx.timer.after` / `cx.timer.every`. Never keep a `cx`.
+- Mods can read and write binary files (`fs/promises` `readFile` → `Uint8Array`,
+  `writeFile`), read within home and write under `~/.config/herdr-app`.
+- `herdr-app check <mod folder>` must pass before a mod is called done.
+- A shared mod must disclose network use, program execution, and reads outside
+  its own folder.
+
+## Licensing
+
+- Code: MIT. `NOTICE` keeps the vscode-pets MIT copyright notice, because the
+  behaviour tables and names are derived from its source, and lists every artist
+  credit from the upstream README.
+- Art: not in this repo, not in its git history, not in test fixtures.
+  - 23 pet types are in the upstream GitHub repo. Dog is CC BY-ND 4.0, finley is
+    MIT, the rest carry no licence file.
+  - cat, frog, bunny and squirrel exist only in the published extension. Cat and
+    frog are paid itch.io packs that upstream keeps out of GitHub at the
+    artist's request.
+- Mirrored copies are made on the user's machine and stay in their cache.
+  BY-ND restricts sharing adapted material, not producing it.
+- `preview.png` shows only pets from the GitHub set.
+
+## Structure
+
+```
+herdr-pets/
+  mods/pets/
+    main.js     panel view: render, input, commands, timers, saved state, overlays
+    engine.js   pure: plans legs from a pet's state, table and panel size
+    pets.js     generated data: per-type table, colours, names, speed, emoji
+    art.js      locates, fetches and caches sprites; calls gif.js
+    gif.js      pure: reads GIF dimensions, writes a horizontally mirrored GIF
+    mod.json    { "place": "left", "size": 220 }
+  scripts/gen-pets.mjs   regenerates pets.js from upstream source at a given tag
+  test/                  Node tests for engine.js and gif.js
+  RECIPE.md  preview.png  README.md  LICENSE  NOTICE
+```
+
+Boundaries:
+
+- `engine.js` and `gif.js` import nothing from `herdr` or `gpui-kit`. They take
+  values and return values, and run under `node --test`.
+- `pets.js` is data only and is never edited by hand.
+- `art.js` is the only module that reaches the network or reads outside the
+  mod's folder.
+- `main.js` owns every Herdr call.
+
+Sprite cache: `~/.config/herdr-app/data/pets/`.
+
+## Art pipeline (`art.js`, `gif.js`)
+
+Sprites are fetched per pet, on first spawn.
+
+1. **Source.** Look for `tonybaloney.vscode-pets-*` under `~/.vscode/extensions`,
+   `~/.vscode-insiders/extensions`, `~/.cursor/extensions` and
+   `~/.vscode-oss/extensions`; take the highest version. If none is found, the
+   source is `https://raw.githubusercontent.com/tonybaloney/vscode-pets/<tag>/media/`
+   with `<tag>` a constant (`1.37.0`).
+2. **Copy.** Files are named `<colour>_<spriteLabel>_8fps.gif` under
+   `media/<type>/`. Copy the labels that type's table uses, plus `swipe`, into
+   `data/pets/<type>/`. If the extension lacks a file, try GitHub for that file.
+   - From an extension: `fs/promises` `readFile` and `writeFile` (binary).
+   - From GitHub: `exec("curl", ["-sfL", "--retry", "2", "-o", file, url, …])`.
+     A mod's `fetch` response exposes only `text()` and `json()`, so it cannot
+     save binary files. `curl` ships with macOS, Windows 10+ and most Linux
+     distributions; it is the mod's only external program, and is needed only
+     when no extension is installed.
+3. **Mirror.** For each file write `<colour>_<spriteLabel>_8fps.left.gif` and
+   record width and height in a per-colour `meta.json`. The meta carries a recipe
+   version so a changed recipe rebuilds the cache.
+4. **Themes.** Fetch `backgrounds/<theme>/background-<dark|light>-<size>.png` and
+   the matching `foreground-…` on first use of that theme, size and appearance.
+
+`gif.js`:
+
+- `readSize(bytes) → { width, height }` from the logical screen descriptor.
+- `flop(bytes) → bytes`: for every frame, LZW-decode, reverse each pixel row,
+  LZW-encode, and set the frame's left offset to
+  `screenWidth − left − frameWidth`. Colour tables, delays, disposal methods,
+  transparency and loop count pass through unchanged. Interlaced frames are
+  de-interlaced on decode and written non-interlaced.
+
+Availability: with an extension installed, all 26 types are offered. Without
+one, cat, frog, bunny and squirrel are greyed out in the picker with the line
+"Needs the vscode-pets extension installed in an editor."
+
+## Behaviour (`engine.js`, `pets.js`)
+
+Upstream ticks every 100 ms and moves each pet `speed` pixels per tick. The
+engine replaces ticks with legs.
+
+`pets.js`, per type: `label`, `emoji`, `colors[]`, `names[]`, `speed` (0–5),
+`startingState`, and `sequence: { [state]: nextStates[] }`. The generator drops
+`chase`, `idle-with-ball` and `chase-friend`, both as rows and as next states.
+
+A **leg** is `{ state, sprite, facing, fromX, toX, fromY, toY, duration }`.
+
+| State | Sprite | Leg |
+|---|---|---|
+| `sit-idle`, `lie` | `idle` / `lie` | hold 5 s (upstream `holdTime` 50 ticks) |
+| `stand-right`, `stand-left` | `stand` | hold 6 s (60 ticks) |
+| `walk-right`, `walk-left` | `walk` | glide to that edge; duration = distance ÷ speed |
+| `run-right`, `run-left` | `walk_fast` | as walk, at 1.6 × speed |
+| `climb-wall-left`, `wall-hang-left`, `wall-dig-left`, `wall-nap`, `jump-down-left`, `land` | `wallclimb`, `wallgrab`, `walldig`, `wallnap`, `fall_from_grab`, `land` | vertical glide or hold at the left wall, upstream speeds and hold times |
+| `swipe` | `swipe` | hold 1.5 s (15 ticks), 👋 bubble |
+
+Rules:
+
+- Speed in px/s = upstream speed × 10, multiplied by a per-pet factor drawn once
+  at spawn from 0.7–1.3. Exact per-state hold times and multipliers are taken
+  from upstream `states.ts` at the pinned tag.
+- Right edge = panel width × 0.95 − sprite width, as upstream. Left edge = 0.
+- A pet with speed 0 (rocky) holds in place for the walk state's hold time.
+- When a leg ends, `main.js` fires a one-shot timer; the engine picks uniformly
+  at random among the current state's next states and plans the next leg.
+- If the panel is shorter than climb height plus sprite height, wall states are
+  removed from the candidates for that pick. If nothing remains, use the
+  starting state.
+- Hover: allowed only for states on the ground. The engine computes the current
+  position as `from + (to − from) × elapsed ÷ duration`, plans a `swipe` leg
+  there, then replans the interrupted state from that position.
+- Resize: any leg whose target is outside the new bounds is replanned from the
+  pet's current position.
+- Sprite width by size: nano 30, small 40, medium 55, large 110. Height keeps
+  the GIF's aspect ratio.
+- Ground line: the theme's floor height for the size (upstream `themes.ts`);
+  0 with no theme.
+
+`engine.js` takes the clock and the random source as arguments, so tests are
+deterministic.
+
+## Panel and controls (`main.js`)
+
+- Root element reports its size with `on_size_change`; all layout derives from it.
+- Layers back to front: theme background, pets, theme foreground, the + button.
+  With no theme the panel uses `theme()` colours.
+- Each pet is an absolutely positioned `image()` with
+  `.transition("left" | "top", { duration, easing: "linear" })`.
+- Empty state: "No pets yet. Click + to add one."
+- **+** (top right, muted): opens the picker as a dialog overlay of this mod
+  (`openOverlay({ mod: "pets", props: { picker: true }, kind: "dialog" })`).
+- **Picker:** search field; type list (emoji, name); the chosen type's colours;
+  a name field pre-filled with a random name from that type's list; Add.
+- **Right-click a pet:** header "<name> the <type>"; Rename; Remove.
+- **Right-click the ground:** Add pet; Theme; Size; Remove all.
+- **Commands** (via `nextCommand()`): `pets.spawn` opens the picker;
+  `pets.remove-all` clears the list. No `keys.json` is shipped.
+- **Saved state:** `setShared("pets", { pets: [{ id, type, color, name }], size, theme })`.
+  Every docked copy renders the same list and animates it independently.
+- **Limit:** 20 pets, a named constant. The picker says so at the limit.
+- Defaults: size nano, theme none.
+
+## Failure handling
+
+| Failure | Behaviour |
+|---|---|
+| Sprites cannot be fetched on spawn | Pet is not added; `notify()` states the reason. Cached pets are unaffected. |
+| Saved pet's cache is missing at start | Refetch. On failure, show the pet as its emoji, standing still. |
+| `flop` cannot parse a GIF | Use the unflipped file for that state; log it. |
+| Extension lacks an expected file | Fetch that file from GitHub. |
+| No extension and `curl` is not on the PATH | Pet is not added; `notify()` says sprites need either vscode-pets installed in an editor or `curl`. |
+| Saved state malformed, or a type no longer exists | Drop bad entries, keep the rest. |
+| Type unavailable without the extension | Greyed in the picker with the reason; cannot be added. |
+
+## Testing
+
+`node --test`, no Herdr required:
+
+- **Tables:** for all 26 types, every state has a planner, every next state
+  exists as a row, the starting state exists, no dropped state remains.
+- **Engine:** leg distance and duration; right-edge rule; speed-0 hold; hover
+  position mid-leg and resume; short panel excludes wall states; resize replans;
+  fixed seed gives a fixed sequence.
+- **Flipper:** `flop(flop(x))` decodes to the same pixels as `x`; a frame
+  covering part of the screen lands mirrored; multi-frame delays and
+  transparency survive; `readSize` is correct. Fixtures are GIFs built in code.
+- **Optional:** when an installed extension is found, run `flop` over its real
+  sprites and assert every file round-trips; skipped otherwise.
+
+In Herdr:
+
+- `herdr-app check mods/pets` passes.
+- Manual run: spawn, rename, remove, resize, each theme, each size, restart.
+- `herdr-app shot` for `preview.png`.
+
+## Release
+
+- Develop at `~/herdr-pets`, with `mods/pets` linked into
+  `~/.config/herdr-app/mods/pets` for live reload.
+- `RECIPE.md` in Herdr's six-part form, written from the finished files. It
+  states that the mod reads editor extension folders in the home directory,
+  and, when no extension is found, runs `curl` to download from
+  `raw.githubusercontent.com`. It runs no other program.
+- `README.md`: what it is, install, where the art comes from and why four pets
+  need the extension, credits.
+- Publish as a public GitHub repo with the topic `herdr-mod`. Publishing happens
+  only on the owner's explicit go-ahead.
