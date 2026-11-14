@@ -348,3 +348,14 @@ test("a small sprite is mirrored without pausing when no time has passed", async
   await art.loadPet("dog", "brown");
   assert.equal(calls.pause, 0);
 });
+
+test("mirroring still pauses when the clock is set back", async () => {
+  const [w, h] = [300, 200];
+  const pixels = Array.from({ length: w * h }, (_, i) => ((i % w) * 7 + Math.floor(i / w)) % 4);
+  const big = makeGif({ width: w, height: h, palette: PALETTE, frames: [{ pixels }] });
+  const { art, calls, clock } = fake({ files: extensionWith(dogFiles("brown"), big) });
+  clock.ms -= 3600000; // an hour back, after the loader took its first reading
+  clock.tick = true; // and time goes on from there
+  await art.loadPet("dog", "brown");
+  assert.ok(calls.pause >= 5, `${calls.pause} pauses`);
+});

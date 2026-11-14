@@ -35,7 +35,8 @@ export function createArt({ exec, fs, home, appHome, pause = async () => {}, now
   // Awaited between slices of mirroring: a real pause once BREATH_MS has gone by.
   let breathed = now();
   async function breathe() {
-    if (now() - breathed < BREATH_MS) return;
+    const since = now() - breathed;
+    if (since >= 0 && since < BREATH_MS) return; // a clock set back still gets its pause
     await pause();
     breathed = now();
   }
