@@ -55,9 +55,9 @@ its mirrored sprites are made on your machine, in small steps so Herdr stays res
 
 ## Screenshots
 
-Pets in the Forest theme, standing on its ground behind the foreground bushes:
+Pets in the panel, at the default size on the panel's own background:
 
-![Totoro, a crab, a rubber duck with a boombox and a fox in the Forest theme](screenshots/forest.png)
+<img src="screenshots/pets.png" alt="A skeleton standing on a crab, beside a rubber duck with a boombox" width="380">
 
 Adding a pet: type to filter the 27 animals, pick one, then its colour and a name.
 
