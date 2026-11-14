@@ -34,7 +34,8 @@ export function load(raw) {
   for (const p of Array.isArray(saved.pets) ? saved.pets : []) {
     if (pets.length >= MAX_PETS) break;
     if (!p || typeof p !== "object" || typeof p.id !== "string" || ids.has(p.id)) continue;
-    const def = PETS[p.type];
+    // hasOwn: a saved type of "constructor" must not find Object's own members.
+    const def = Object.hasOwn(PETS, p.type) ? PETS[p.type] : null;
     if (!def) continue; // a pet type this version no longer has
     ids.add(p.id);
     pets.push({

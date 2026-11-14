@@ -72,3 +72,14 @@ test("newId is built from the clock and the random source", () => {
   assert.equal(newId(1000, () => 0.5), "rs-89oqgw");
   assert.notEqual(newId(1000, () => 0.1), newId(1000, () => 0.2));
 });
+
+test("load drops a type that is only a built-in object member", () => {
+  for (const type of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+    assert.deepEqual(load({ pets: [{ id: "x", type, color: "red", name: "X" }, rex] }).pets, [rex], type);
+  }
+});
+
+test("addPet ignores a pet whose id is already there", () => {
+  const state = addPet(load({ pets: [rex] }), { ...rex, name: "Twin" });
+  assert.deepEqual(state.pets, [rex]);
+});
