@@ -89,11 +89,13 @@ herdr-pets/
   mods/pets/
     main.js     panel view: render, input, commands, the leg check; a dialog when opened with props().role
     dialogs.js  the picker, the rename prompt and the right-click menus
+    roster.js   pure: keeps the pets on screen in step with the saved list; what to draw
     engine.js   pure: plans legs from a pet's state, table and panel size
     pets.js     generated data: per-type table, colours, names, speed, emoji
     store.js    pure: the saved value (pets, size, theme) and its changes
     sources.js  pure: sprite file names, URLs, version compare, drawn sizes
-    art.js      locates, fetches and caches sprites; calls gif.js
+    artcore.js  pure given its IO: locates, fetches and caches sprites; calls gif.js
+    art.js      hands artcore.js Herdr's exec, fs/promises, home and appHome
     gif.js      pure: reads GIF dimensions, writes a horizontally mirrored GIF
     mod.json    { "place": "left", "size": 220 }
   scripts/gen-pets.mjs   regenerates pets.js from upstream source at a given tag
@@ -103,11 +105,13 @@ herdr-pets/
 
 Boundaries:
 
-- `engine.js`, `gif.js`, `store.js` and `sources.js` import nothing from `herdr`
-  or `gpui-kit`. They take values and return values, and run under `node --test`.
+- `engine.js`, `gif.js`, `store.js`, `sources.js`, `roster.js` and `artcore.js`
+  import nothing from `herdr` or `gpui-kit`. They take values and return values
+  (`artcore.js` is handed its file and program access), and run under `node --test`.
 - `pets.js` is data only and is never edited by hand.
-- `art.js` is the only module that reaches the network or reads outside the
-  mod's folder.
+- `art.js` is the only module that imports Herdr's file and program access; what
+  is done with it (reading editors' extension folders, running `curl`) is in
+  `artcore.js`.
 - `main.js` and `dialogs.js` own every drawing and state call to Herdr.
 
 Sprite cache: `~/.config/herdr-app/data/pets/`.
@@ -283,4 +287,30 @@ testing the modules:
 - Per-pet behaviour that upstream keeps in code is carried as data in the
   generated tables: swipe bubbles (finley, horse, skeleton, squirrel) and the
   squirrel's speed, climb and fall.
+
+Made on 2026-11-14 after the per-task and whole-branch reviews:
+
+- The art loader is split: `artcore.js` holds the logic with its file and program
+  access passed in, so its failure paths are tested; `art.js` is a thin wrapper.
+- No load waits on another's promise. Every copy of the mod shares its modules, and
+  Herdr stops a closed dialog's work part-way, leaving its promise pending for ever.
+  Each load downloads into a side file of its own and puts only whole files in place.
+- curl runs without `-f` and with `-w %{http_code}`: 200 is kept, 404 marks an
+  animation the pet does not have, anything else is an error. It also has
+  `--proto =https`, `--max-time` and `--max-filesize`.
+- The newest extension is taken across all four editor folders. "No extension" is
+  looked up again after 30 seconds, so installing it is noticed without a restart.
+- Downloaded bytes are treated as untrusted: a GIF with an undefined code, short
+  data or an oversized frame is rejected, and so is a PNG claiming width or height 0.
+- A pet's element is one size-box high with its picture standing on the bottom, so
+  its feet do not move when it changes to an animation of another height. Only the
+  axis a leg moves on gets the leg's remaining time as its transition.
+- `refit` brings a pet on the wall down when the panel no longer contains it, and a
+  climb never heads below a floor higher than the climb height.
+- `roster.js` (pure) holds the panel's bookkeeping, so the flow from saved list to
+  drawn pet is tested.
+- Pets stand on a theme's ground only once its picture has loaded. A pet without
+  sprites does not react to the pointer.
+- A saved pet whose type is not one of the tables' own string keys is dropped.
+- Tests need Node 22 or newer (the test script uses a glob).
 
