@@ -75,7 +75,9 @@ export function enter(pet, state, pos, env, now, rng) {
     leg.duration = travel(Math.abs(leg.toX - leg.fromX), speed);
   } else if (s.move === "up") {
     const [lo, hi] = climbRange(def, pet, env) ?? [y, y];
-    leg.toY = Math.round(lo + rng() * (hi - lo));
+    // On a high floor (castle or beach at large is 120) the pet already stands above
+    // the climb height; upstream ends the climb at once, and so does this.
+    leg.toY = Math.max(y, Math.round(lo + rng() * (hi - lo)));
     leg.duration = travel(Math.abs(leg.toY - y), (def.climbSpeed ?? CLIMB_SPEED) * 10);
   } else if (s.move === "down") {
     leg.toY = env.floor;

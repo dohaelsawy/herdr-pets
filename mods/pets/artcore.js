@@ -1,6 +1,11 @@
 // Finds the sprites and keeps a copy under ~/.config/herdr-app/data/pets/.
 // The logic lives here with its file and program access passed in, so it runs under
 // tests; art.js hands it Herdr's real ones. Nothing it fetches is ever part of this repo.
+//
+// Every copy of the mod shares this module, and Herdr stops a closed dialog's work
+// part-way. So no call waits on another's: each does its own work, downloads into a
+// file of its own, and puts only finished files in place. Two calls for the same pet
+// write the same bytes to the same names.
 import { UPSTREAM_TAG } from "./pets.js";
 import { spritesFor } from "./engine.js";
 import { readSize, flop } from "./gif.js";
@@ -10,28 +15,39 @@ export const DATA_REL = "data/pets"; // image() paths are relative to ~/.config/
 const RECIPE = 1; // bump when what is cached changes shape, so old caches are rebuilt
 const CURL_SECONDS = 20; // per attempt
 const EXEC_MS = 90000; // curl's three attempts and their pauses fit inside this
+const MAX_BYTES = 20_000_000; // no sprite or picture comes near this
+const RECHECK_MS = 30000; // how long "no extension installed" is believed
 
 const dirOf = (path) => path.slice(0, path.lastIndexOf("/"));
 const reason = (e) => String(e?.message ?? e);
 
 // io: { exec, fs, home, appHome } with the shapes of Herdr's `exec`, `fs/promises`,
-// `home()` and `appHome()`.
-export function createArt({ exec, fs, home, appHome }) {
+// `home()` and `appHome()`; `now` is the clock, for tests.
+export function createArt({ exec, fs, home, appHome, now = Date.now }) {
   const has = (path) => fs.exists(path).catch(() => false);
   const remove = (path) => fs.unlink(path).catch(() => {});
+  let downloads = 0;
 
-  // The media folder of the newest installed vscode-pets, or null. Looked up once: the
-  // promise is kept, so callers that arrive during the lookup wait for the same answer.
-  let lookup;
-  const extensionMedia = () => (lookup ??= findExtension());
+  // The media folder of the newest installed vscode-pets, or null. Once found it is
+  // remembered; "none" is looked up again after a while, so installing the extension
+  // is noticed without restarting Herdr.
+  let known = null; // { media, at }
+  async function extensionMedia() {
+    if (known && (known.media || now() - known.at < RECHECK_MS)) return known.media;
+    const media = await findExtension();
+    known = { media, at: now() };
+    return media;
+  }
 
   async function findExtension() {
+    const found = new Map(); // extension folder name -> its media folder
     for (const rel of EDITOR_DIRS) {
       const dir = `${home()}/${rel}`;
-      const found = newestExtension(await fs.readdir(dir).catch(() => []));
-      if (found && (await has(`${dir}/${found}/media`))) return `${dir}/${found}/media`;
+      const name = newestExtension(await fs.readdir(dir).catch(() => []));
+      if (name && !found.has(name) && (await has(`${dir}/${name}/media`))) found.set(name, `${dir}/${name}/media`);
     }
-    return null;
+    const newest = newestExtension([...found.keys()]);
+    return newest ? found.get(newest) : null;
   }
 
   // Puts media/<rel> at dest and returns its bytes; null when upstream has no such file.
@@ -42,13 +58,18 @@ export function createArt({ exec, fs, home, appHome }) {
       await fs.writeFile(dest, bytes);
       return bytes;
     }
-    // curl writes to a side file, so a download that is cut short never sits at dest.
-    const part = `${dest}.part`;
+    // curl writes to a side file that only this call uses, so a download that is cut
+    // short, or another call's download, never sits at dest.
+    const part = `${dest}.${now().toString(36)}-${(downloads++).toString(36)}.part`;
     let r;
     try {
       r = await exec(
         "curl",
-        ["-sL", "--retry", "2", "--connect-timeout", "10", "--max-time", String(CURL_SECONDS), "-o", part, "-w", "%{http_code}", rawUrl(UPSTREAM_TAG, rel)],
+        [
+          "-sL", "--proto", "=https", "--retry", "2", "--connect-timeout", "10",
+          "--max-time", String(CURL_SECONDS), "--max-filesize", String(MAX_BYTES),
+          "-o", part, "-w", "%{http_code}", rawUrl(UPSTREAM_TAG, rel),
+        ],
         { timeout: EXEC_MS },
       );
     } catch (e) {
@@ -74,16 +95,21 @@ export function createArt({ exec, fs, home, appHome }) {
   async function cachedPet(metaFile) {
     try {
       const meta = JSON.parse(await fs.readFile(metaFile, "utf8"));
-      const files = Object.values(meta.sprites ?? {}).flatMap((s) => [s.right, s.left]);
-      if (meta.recipe !== RECIPE || files.length === 0) return null;
-      for (const rel of files) if (!(await has(`${appHome()}/${rel}`))) return null;
+      const sprites = Object.values(meta.sprites ?? {});
+      if (meta.recipe !== RECIPE || sprites.length === 0) return null;
+      for (const s of sprites) {
+        if (!(s.width > 0 && s.height > 0)) return null;
+        if (!(await has(`${appHome()}/${s.right}`)) || !(await has(`${appHome()}/${s.left}`))) return null;
+      }
       return meta;
     } catch {
       return null;
     }
   }
 
-  async function buildPet(type, color) {
+  // One pet's animations: { recipe, sprites: { <label>: { right, left, width, height } } },
+  // with paths ready for image(). Cached per type and colour.
+  async function loadPet(type, color) {
     const dir = `${appHome()}/${DATA_REL}/${type}`;
     const metaFile = `${dir}/${color.replaceAll(" ", "_")}.json`;
     const cached = await cachedPet(metaFile);
@@ -121,7 +147,7 @@ export function createArt({ exec, fs, home, appHome }) {
   }
 
   // A theme's pictures: { background, foreground }, each { path, width, height } or null.
-  async function buildTheme(theme, dark, size) {
+  async function loadTheme(theme, dark, size) {
     const out = {};
     for (const [layer, rel] of Object.entries(themeFiles(theme, dark, size))) {
       const dest = `${appHome()}/${DATA_REL}/${rel}`;
@@ -146,19 +172,6 @@ export function createArt({ exec, fs, home, appHome }) {
     if (!out.background && !out.foreground) throw new Error(`No pictures found for the ${theme} theme.`);
     return out;
   }
-
-  // Every copy of the mod shares this module. Callers asking for the same thing at
-  // once share one piece of work, so two of them never write the same files together.
-  const inFlight = new Map();
-  function once(key, work) {
-    if (!inFlight.has(key)) inFlight.set(key, work().finally(() => inFlight.delete(key)));
-    return inFlight.get(key);
-  }
-
-  // One pet's animations: { recipe, sprites: { <label>: { right, left, width, height } } },
-  // with paths ready for image(). Cached per type and colour.
-  const loadPet = (type, color) => once(`pet/${type}/${color}`, () => buildPet(type, color));
-  const loadTheme = (theme, dark, size) => once(`theme/${theme}/${dark ? "dark" : "light"}/${size}`, () => buildTheme(theme, dark, size));
 
   return { extensionMedia, loadPet, loadTheme };
 }

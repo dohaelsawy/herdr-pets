@@ -22,10 +22,12 @@ const DOG = ["idle", "lie", "swipe", "walk", "walk_fast"]; // the dog's sprite l
 const url = (rel) => rawUrl("1.37.0", rel);
 
 // A file system in memory and a curl that serves `web` (url -> bytes, a status number,
-// or "drop" for a connection lost part-way). Everything the code did is recorded.
+// "drop" for a connection lost part-way, or "hang" for a download that never returns).
+// Everything the code did is recorded. `clock.ms` is the time the code sees.
 function fake({ files = {}, web = {}, curl = true, slowReaddir = false } = {}) {
   const disk = new Map(Object.entries(files));
   const calls = { curl: [], readdir: 0 };
+  const clock = { ms: 1000 };
   const fs = {
     async exists(path) {
       return disk.has(path) || [...disk.keys()].some((k) => k.startsWith(`${path}/`));
@@ -53,11 +55,14 @@ function fake({ files = {}, web = {}, curl = true, slowReaddir = false } = {}) {
   };
   async function exec(command, args, options) {
     if (command !== "curl" || !curl) throw new Error("program not found");
-    await new Promise((r) => setImmediate(r)); // a real download takes a while
     const part = args[args.indexOf("-o") + 1];
     const target = args.at(-1);
-    calls.curl.push({ target, options });
+    calls.curl.push({ target, options, args });
     const answer = web[target] ?? 404;
+    if (answer === "hang") return new Promise(() => {});
+    // A real download takes a while, and the file is incomplete until it ends.
+    if (answer instanceof Uint8Array) disk.set(part, answer.subarray(0, 5));
+    await new Promise((r) => setImmediate(r));
     if (answer === "drop") {
       disk.set(part, GIF.subarray(0, 5));
       return { code: 56, stdout: "000", stderr: "" };
@@ -66,11 +71,13 @@ function fake({ files = {}, web = {}, curl = true, slowReaddir = false } = {}) {
       disk.set(part, new TextEncoder().encode("<html>error</html>"));
       return { code: 0, stdout: String(answer), stderr: "" };
     }
-    disk.set(part, answer);
+    // curl keeps writing to the file it opened: if someone else removed that name
+    // meanwhile, the bytes go nowhere and the name stays gone.
+    if (disk.has(part)) disk.set(part, answer);
     return { code: 0, stdout: "200", stderr: "" };
   }
-  const art = createArt({ exec, fs, home: () => HOME, appHome: () => APP });
-  return { art, disk, calls };
+  const art = createArt({ exec, fs, home: () => HOME, appHome: () => APP, now: () => clock.ms });
+  return { art, disk, calls, clock };
 }
 
 const extensionWith = (rels, bytes = GIF) => Object.fromEntries(rels.map((rel) => [`${MEDIA}/${rel}`, bytes]));
@@ -87,11 +94,31 @@ test("extensionMedia finds the newest installed extension", async () => {
   assert.equal(await art.extensionMedia(), MEDIA);
 });
 
-test("extensionMedia is null with no extension, and looks only once", async () => {
-  const { art, calls } = fake();
+test("extensionMedia takes the newest version across every editor's folder", async () => {
+  const cursor = `${HOME}/.cursor/extensions/tonybaloney.vscode-pets-1.38.0/media`;
+  const { art } = fake({ files: { [`${MEDIA}/dog/x.gif`]: GIF, [`${cursor}/dog/x.gif`]: GIF } });
+  assert.equal(await art.extensionMedia(), cursor);
+});
+
+test("no extension is believed for a while, then looked for again", async () => {
+  const { art, calls, clock, disk } = fake();
   assert.equal(await art.extensionMedia(), null);
   assert.equal(await art.extensionMedia(), null);
   assert.equal(calls.readdir, 4); // the four editor folders, one time
+  disk.set(`${MEDIA}/dog/x.gif`, GIF); // the person installs vscode-pets
+  clock.ms += 29000;
+  assert.equal(await art.extensionMedia(), null);
+  clock.ms += 2000;
+  assert.equal(await art.extensionMedia(), MEDIA);
+});
+
+test("a found extension is remembered", async () => {
+  const { art, calls, clock } = fake({ files: extensionWith(["dog/x.gif"]) });
+  await art.extensionMedia();
+  const looks = calls.readdir;
+  clock.ms += 3600000;
+  assert.equal(await art.extensionMedia(), MEDIA);
+  assert.equal(calls.readdir, looks);
 });
 
 test("callers that ask during the lookup get the same answer, not an early null", async () => {
@@ -122,7 +149,11 @@ test("loadPet downloads from the pinned tag when there is no extension", async (
   assert.deepEqual(Object.keys(meta.sprites).sort(), DOG);
   assert.equal(calls.curl.length, 5);
   assert.ok(calls.curl[0].target.startsWith("https://raw.githubusercontent.com/tonybaloney/vscode-pets/1.37.0/media/dog/"));
-  assert.equal(calls.curl[0].options.timeout, 90000);
+  for (const call of calls.curl) {
+    assert.equal(call.options.timeout, 90000);
+    assert.equal(call.args[call.args.indexOf("--proto") + 1], "=https");
+    assert.ok(call.args.includes("--max-time") && call.args.includes("--max-filesize"));
+  }
   assert.deepEqual(leftovers(disk), []);
 });
 
@@ -203,12 +234,36 @@ test("a cache with any file missing is rebuilt", async () => {
   assert.ok(disk.has(`${CACHE}/dog/brown_lie_8fps.left.gif`));
 });
 
-test("two loads of the same pet at once share one download", async () => {
+test("two loads of the same pet at once both finish, with whole files and nothing left over", async () => {
   const web = Object.fromEntries(dogFiles("brown").map((rel) => [url(rel), GIF]));
-  const { art, calls } = fake({ web });
+  const { art, disk } = fake({ web });
   const [a, b] = await Promise.all([art.loadPet("dog", "brown"), art.loadPet("dog", "brown")]);
-  assert.equal(a, b);
-  assert.equal(calls.curl.length, 5);
+  assert.deepEqual(a, b);
+  assert.deepEqual(Object.keys(a.sprites).sort(), DOG);
+  for (const rel of dogFiles("brown")) assert.deepEqual(disk.get(`${CACHE}/${rel}`), GIF, rel);
+  assert.deepEqual(leftovers(disk), []);
+});
+
+// The time limit turns "waits for ever" into a failure instead of a stuck test run.
+test("a load that never finishes does not hold up the next one", { timeout: 3000 }, async () => {
+  const web = Object.fromEntries(dogFiles("brown").map((rel) => [url(rel), "hang"]));
+  const { art } = fake({ web });
+  let settled = false;
+  art.loadPet("dog", "brown").finally(() => { settled = true; }); // a dialog closed mid-download
+  await new Promise((r) => setImmediate(r));
+  for (const rel of dogFiles("brown")) web[url(rel)] = GIF;
+  assert.deepEqual(Object.keys((await art.loadPet("dog", "brown")).sprites).sort(), DOG);
+  assert.equal(settled, false);
+});
+
+test("a cache whose recorded sizes are not numbers is rebuilt", async () => {
+  const web = Object.fromEntries(dogFiles("brown").map((rel) => [url(rel), GIF]));
+  const { art, disk, calls } = fake({ web });
+  const meta = await art.loadPet("dog", "brown");
+  meta.sprites.walk.width = "wide";
+  disk.set(`${CACHE}/dog/brown.json`, new TextEncoder().encode(JSON.stringify(meta)));
+  assert.equal((await art.loadPet("dog", "brown")).sprites.walk.width, 3);
+  assert.equal(calls.curl.length, 10);
 });
 
 test("a colour with a space is stored with an underscore", async () => {
@@ -254,12 +309,13 @@ test("a theme picture that is not a PNG is removed and reported plainly", async 
   assert.ok(!disk.has(`${CACHE}/${rel}`));
 });
 
-test("two loads of the same theme at once share one download", async () => {
+test("two loads of the same theme at once both get whole pictures", async () => {
   const rels = ["backgrounds/forest/background-dark-nano.png", "backgrounds/forest/foreground-dark-nano.png"];
-  const { art, disk, calls } = fake({ web: Object.fromEntries(rels.map((rel) => [url(rel), PNG])) });
+  const { art, disk } = fake({ web: Object.fromEntries(rels.map((rel) => [url(rel), PNG])) });
   const [a, b] = await Promise.all([art.loadTheme("forest", true, "nano"), art.loadTheme("forest", true, "nano")]);
-  assert.equal(a, b);
-  assert.equal(calls.curl.length, 2); // one per picture, not one per caller
+  assert.deepEqual(a, b);
+  assert.equal(a.background.width, 351);
+  for (const rel of rels) assert.deepEqual(disk.get(`${CACHE}/${rel}`), PNG, rel);
   assert.deepEqual(leftovers(disk), []);
 });
 

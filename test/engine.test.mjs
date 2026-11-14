@@ -229,3 +229,11 @@ test("refit re-aims a fall at a floor that moved up, and lands on it", () => {
   assert.equal(refit(pet, forest, 10, half), true);
   assert.deepEqual([pet.state, pet.leg.fromY, pet.leg.toY], ["land", 23, 23]);
 });
+
+test("a climb never heads below a floor that is higher than the climb height", () => {
+  const castle = { width: 400, height: 400, floor: 120 }; // castle at large
+  const pet = cat(castle);
+  const up = enter(pet, "climb-wall-left", { x: 0, y: 120 }, castle, 0, half);
+  assert.deepEqual([up.fromY, up.toY, up.duration], [120, 120, 100]);
+  assert.equal(refit(pet, castle, 50, half), false);
+});
