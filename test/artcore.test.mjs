@@ -53,6 +53,7 @@ function fake({ files = {}, web = {}, curl = true, slowReaddir = false } = {}) {
   };
   async function exec(command, args, options) {
     if (command !== "curl" || !curl) throw new Error("program not found");
+    await new Promise((r) => setImmediate(r)); // a real download takes a while
     const part = args[args.indexOf("-o") + 1];
     const target = args.at(-1);
     calls.curl.push({ target, options });
@@ -251,4 +252,21 @@ test("a theme picture that is not a PNG is removed and reported plainly", async 
   const { art, disk } = fake({ web: { [url(rel)]: new TextEncoder().encode("<html>a page that is long enough</html>") } });
   await assert.rejects(art.loadTheme("forest", true, "nano"), /The forest theme's background picture is not a valid PNG/);
   assert.ok(!disk.has(`${CACHE}/${rel}`));
+});
+
+test("two loads of the same theme at once share one download", async () => {
+  const rels = ["backgrounds/forest/background-dark-nano.png", "backgrounds/forest/foreground-dark-nano.png"];
+  const { art, disk, calls } = fake({ web: Object.fromEntries(rels.map((rel) => [url(rel), PNG])) });
+  const [a, b] = await Promise.all([art.loadTheme("forest", true, "nano"), art.loadTheme("forest", true, "nano")]);
+  assert.equal(a, b);
+  assert.equal(calls.curl.length, 2); // one per picture, not one per caller
+  assert.deepEqual(leftovers(disk), []);
+});
+
+test("a load that failed is tried again the next time", async () => {
+  const web = Object.fromEntries(dogFiles("brown").map((rel) => [url(rel), 503]));
+  const { art } = fake({ web });
+  await assert.rejects(art.loadPet("dog", "brown"), /Download failed/);
+  for (const rel of dogFiles("brown")) web[url(rel)] = GIF;
+  assert.deepEqual(Object.keys((await art.loadPet("dog", "brown")).sprites).sort(), DOG);
 });

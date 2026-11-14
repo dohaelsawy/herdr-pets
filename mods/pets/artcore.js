@@ -61,10 +61,13 @@ export function createArt({ exec, fs, home, appHome }) {
       if (r.code === 0 && status === "404") return null; // upstream has no such file
       throw new Error(r.code !== 0 ? `Download failed (curl ${r.code}). Check the connection.` : `Download failed (HTTP ${status}).`);
     }
-    const bytes = await fs.readFile(part);
-    await fs.writeFile(dest, bytes);
-    await remove(part);
-    return bytes;
+    try {
+      const bytes = await fs.readFile(part);
+      await fs.writeFile(dest, bytes);
+      return bytes;
+    } finally {
+      await remove(part);
+    }
   }
 
   // The cached answer for one pet, or null when any of it is missing or out of date.
@@ -117,18 +120,8 @@ export function createArt({ exec, fs, home, appHome }) {
     return meta;
   }
 
-  // One pet's animations: { recipe, sprites: { <label>: { right, left, width, height } } },
-  // with paths ready for image(). Cached per type and colour. Callers asking for the
-  // same pet at once share one load.
-  const loading = new Map();
-  function loadPet(type, color) {
-    const key = `${type}/${color}`;
-    if (!loading.has(key)) loading.set(key, buildPet(type, color).finally(() => loading.delete(key)));
-    return loading.get(key);
-  }
-
   // A theme's pictures: { background, foreground }, each { path, width, height } or null.
-  async function loadTheme(theme, dark, size) {
+  async function buildTheme(theme, dark, size) {
     const out = {};
     for (const [layer, rel] of Object.entries(themeFiles(theme, dark, size))) {
       const dest = `${appHome()}/${DATA_REL}/${rel}`;
@@ -153,6 +146,19 @@ export function createArt({ exec, fs, home, appHome }) {
     if (!out.background && !out.foreground) throw new Error(`No pictures found for the ${theme} theme.`);
     return out;
   }
+
+  // Every copy of the mod shares this module. Callers asking for the same thing at
+  // once share one piece of work, so two of them never write the same files together.
+  const inFlight = new Map();
+  function once(key, work) {
+    if (!inFlight.has(key)) inFlight.set(key, work().finally(() => inFlight.delete(key)));
+    return inFlight.get(key);
+  }
+
+  // One pet's animations: { recipe, sprites: { <label>: { right, left, width, height } } },
+  // with paths ready for image(). Cached per type and colour.
+  const loadPet = (type, color) => once(`pet/${type}/${color}`, () => buildPet(type, color));
+  const loadTheme = (theme, dark, size) => once(`theme/${theme}/${dark ? "dark" : "light"}/${size}`, () => buildTheme(theme, dark, size));
 
   return { extensionMedia, loadPet, loadTheme };
 }
